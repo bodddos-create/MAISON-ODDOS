@@ -2,11 +2,12 @@
 import {useEffect,useMemo,useState} from 'react'
 import {createClient} from '@supabase/supabase-js'
 const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE')
+const DEV_ESTS=[{id:'villa-valleyre',name:'Villa Valleyre'},{id:'maison-du-parc',name:'La Maison du Parc'}]
 const euro=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
 export default function Home(){
- const [ests,setEsts]=useState([]),[sales,setSales]=useState([]),[invoices,setInvoices]=useState([]),[charges,setCharges]=useState([]),[tab,setTab]=useState('direction'),[selectedEst,setSelectedEst]=useState('all')
+ const [ests,setEsts]=useState(DEV_ESTS),[sales,setSales]=useState([]),[invoices,setInvoices]=useState([]),[charges,setCharges]=useState([]),[tab,setTab]=useState('direction'),[selectedEst,setSelectedEst]=useState('all')
  useEffect(()=>{load()},[])
- async function load(){const [{data:e},{data:s},{data:i},{data:c}]=await Promise.all([sb.from('establishments').select('*').eq('active',true),sb.from('daily_sales').select('*').order('business_date',{ascending:false}).limit(100),sb.from('supplier_invoices').select('*').order('invoice_date',{ascending:false}).limit(100),sb.from('fixed_charges').select('*').order('month',{ascending:false}).limit(100)]);setEsts(e||[]);setSales(s||[]);setInvoices(i||[]);setCharges(c||[])}
+ async function load(){const [{data:e},{data:s},{data:i},{data:c}]=await Promise.all([sb.from('establishments').select('*').eq('active',true),sb.from('daily_sales').select('*').order('business_date',{ascending:false}).limit(100),sb.from('supplier_invoices').select('*').order('invoice_date',{ascending:false}).limit(100),sb.from('fixed_charges').select('*').order('month',{ascending:false}).limit(100)]);if(e?.length)setEsts(e);setSales(s||[]);setInvoices(i||[]);setCharges(c||[])}
  const fs=selectedEst==='all'?sales:sales.filter(x=>x.establishment_id===selectedEst),fi=selectedEst==='all'?invoices:invoices.filter(x=>x.establishment_id===selectedEst),fc=selectedEst==='all'?charges:charges.filter(x=>x.establishment_id===selectedEst)
  const totals=useMemo(()=>{const ca=fs.reduce((a,x)=>a+Number(x.lunch_sales_ht)+Number(x.dinner_sales_ht),0),covers=fs.reduce((a,x)=>a+Number(x.lunch_covers)+Number(x.dinner_covers),0),personnel=fs.reduce((a,x)=>a+Number(x.staff_cost),0),achats=fi.reduce((a,x)=>a+Number(x.amount_ht),0),fixes=fc.reduce((a,x)=>a+Number(x.amount),0);return{ca,covers,personnel,achats,fixes,result:ca-achats-personnel-fixes}},[fs,fi,fc])
  const name=id=>ests.find(e=>e.id===id)?.name||'—'
