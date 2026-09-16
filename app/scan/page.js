@@ -1,12 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@supabase/supabase-js'
-
-const supabase = createClient(
-  'https://ldwgsogeqreywbqulqyj.supabase.co',
-  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_placeholder'
-)
 
 export default function ScanPage() {
   const [type, setType] = useState('invoice')
@@ -22,17 +16,16 @@ export default function ScanPage() {
     setPreview(selected ? URL.createObjectURL(selected) : '')
   }
 
-  async function prepare() {
+  function prepare() {
     if (!file) return setMessage('Prenez une photo ou choisissez un document.')
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return setMessage('Connectez-vous d’abord à Maison Oddos.')
-    setMessage('Document prêt. La lecture automatique sera activée à l’étape suivante.')
+    setMessage('Photo reçue correctement. Mode développement : la connexion est désactivée. Prochaine étape : lecture automatique et affichage des informations détectées.')
   }
 
   return (
     <main style={{minHeight:'100vh',background:'#f4f1e9',padding:'24px',fontFamily:'Arial,sans-serif',color:'#24372d'}}>
       <div style={{maxWidth:680,margin:'0 auto'}}>
         <a href="/" style={{color:'#52684e',textDecoration:'none'}}>← Retour au pilotage</a>
+        <div style={{marginTop:18,background:'#fff4cf',padding:'10px 14px',borderRadius:10,fontSize:13}}><strong>MODE DÉVELOPPEMENT</strong> · Scanner ouvert sans connexion</div>
         <h1 style={{fontFamily:'Georgia,serif',fontSize:34,marginBottom:4}}>Scanner un document</h1>
         <p style={{marginTop:0,color:'#68736b'}}>Maison Oddos · saisie rapide depuis le téléphone</p>
 
@@ -44,8 +37,8 @@ export default function ScanPage() {
         <section style={{background:'white',borderRadius:18,padding:22,boxShadow:'0 8px 28px rgba(0,0,0,.08)'}}>
           <h2 style={{marginTop:0}}>{type==='invoice' ? 'Photographier une facture' : 'Photographier le Z de caisse'}</h2>
           <p>{type==='invoice'
-            ? 'L’objectif est de reconnaître automatiquement le restaurant, le fournisseur, la catégorie, la date et les montants.'
-            : 'L’objectif est de reconnaître automatiquement le restaurant, la date, le chiffre d’affaires et le nombre de couverts.'}</p>
+            ? 'Le scanner devra reconnaître automatiquement Villa Valleyre ou La Maison du Parc, le fournisseur, la catégorie, la date et les montants.'
+            : 'Le scanner devra reconnaître automatiquement Villa Valleyre ou La Maison du Parc, la date, le chiffre d’affaires et le nombre de couverts.'}</p>
 
           <label style={{display:'block',border:'2px dashed #a6ad9d',borderRadius:14,padding:28,textAlign:'center',cursor:'pointer',margin:'20px 0'}}>
             <strong>📷 Prendre une photo</strong><br/>
@@ -70,8 +63,5 @@ export default function ScanPage() {
 }
 
 function button(active) {
-  return {
-    border:0,borderRadius:12,padding:'12px 10px',fontWeight:700,cursor:'pointer',
-    background:active?'#405944':'#dedfd7',color:active?'white':'#344238'
-  }
+  return {border:0,borderRadius:12,padding:'12px 10px',fontWeight:700,cursor:'pointer',background:active?'#405944':'#dedfd7',color:active?'white':'#344238'}
 }
