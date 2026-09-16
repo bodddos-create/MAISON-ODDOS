@@ -1,67 +1,15 @@
 'use client'
-
-import { useState } from 'react'
-
-export default function ScanPage() {
-  const [type, setType] = useState('invoice')
-  const [file, setFile] = useState(null)
-  const [preview, setPreview] = useState('')
-  const [message, setMessage] = useState('')
-
-  function chooseFile(e) {
-    const selected = e.target.files?.[0]
-    setFile(selected || null)
-    setMessage('')
-    if (preview) URL.revokeObjectURL(preview)
-    setPreview(selected ? URL.createObjectURL(selected) : '')
-  }
-
-  function prepare() {
-    if (!file) return setMessage('Prenez une photo ou choisissez un document.')
-    setMessage('Photo reçue correctement. Mode développement : la connexion est désactivée. Prochaine étape : lecture automatique et affichage des informations détectées.')
-  }
-
-  return (
-    <main style={{minHeight:'100vh',background:'#f4f1e9',padding:'24px',fontFamily:'Arial,sans-serif',color:'#24372d'}}>
-      <div style={{maxWidth:680,margin:'0 auto'}}>
-        <a href="/" style={{color:'#52684e',textDecoration:'none'}}>← Retour au pilotage</a>
-        <div style={{marginTop:18,background:'#fff4cf',padding:'10px 14px',borderRadius:10,fontSize:13}}><strong>MODE DÉVELOPPEMENT</strong> · Scanner ouvert sans connexion</div>
-        <h1 style={{fontFamily:'Georgia,serif',fontSize:34,marginBottom:4}}>Scanner un document</h1>
-        <p style={{marginTop:0,color:'#68736b'}}>Maison Oddos · saisie rapide depuis le téléphone</p>
-
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,margin:'24px 0'}}>
-          <button onClick={()=>setType('invoice')} style={button(type==='invoice')}>Facture fournisseur</button>
-          <button onClick={()=>setType('z')} style={button(type==='z')}>Z de caisse</button>
-        </div>
-
-        <section style={{background:'white',borderRadius:18,padding:22,boxShadow:'0 8px 28px rgba(0,0,0,.08)'}}>
-          <h2 style={{marginTop:0}}>{type==='invoice' ? 'Photographier une facture' : 'Photographier le Z de caisse'}</h2>
-          <p>{type==='invoice'
-            ? 'Le scanner devra reconnaître automatiquement Villa Valleyre ou La Maison du Parc, le fournisseur, la catégorie, la date et les montants.'
-            : 'Le scanner devra reconnaître automatiquement Villa Valleyre ou La Maison du Parc, la date, le chiffre d’affaires et le nombre de couverts.'}</p>
-
-          <label style={{display:'block',border:'2px dashed #a6ad9d',borderRadius:14,padding:28,textAlign:'center',cursor:'pointer',margin:'20px 0'}}>
-            <strong>📷 Prendre une photo</strong><br/>
-            <span style={{fontSize:13,color:'#6f766f'}}>ou sélectionner une image / un PDF</span>
-            <input type="file" accept="image/*,application/pdf" capture="environment" onChange={chooseFile} style={{display:'none'}} />
-          </label>
-
-          {file && <div style={{background:'#f7f6f1',padding:12,borderRadius:10,marginBottom:14}}><strong>{file.name}</strong><br/><small>{Math.round(file.size/1024)} Ko</small></div>}
-          {preview && file?.type?.startsWith('image/') && <img src={preview} alt="Aperçu" style={{width:'100%',maxHeight:420,objectFit:'contain',borderRadius:12,marginBottom:14}} />}
-
-          <button onClick={prepare} style={{...button(true),width:'100%',padding:14}}>Analyser le document</button>
-          {message && <p style={{background:'#eef2e9',padding:12,borderRadius:10,marginBottom:0}}>{message}</p>}
-        </section>
-
-        <section style={{marginTop:18,padding:18,border:'1px solid #d8d8cf',borderRadius:14}}>
-          <strong>Après analyse</strong>
-          <p style={{marginBottom:0}}>Les informations détectées seront affichées pour vérification avant leur enregistrement définitif. Rien ne sera validé sans contrôle.</p>
-        </section>
-      </div>
-    </main>
-  )
-}
-
-function button(active) {
-  return {border:0,borderRadius:12,padding:'12px 10px',fontWeight:700,cursor:'pointer',background:active?'#405944':'#dedfd7',color:active?'white':'#344238'}
-}
+import {useState} from 'react'
+const restaurants=['Villa Valleyre','La Maison du Parc']
+export default function ScanPage(){
+ const [type,setType]=useState('invoice'),[file,setFile]=useState(null),[preview,setPreview]=useState(''),[result,setResult]=useState(null),[message,setMessage]=useState('')
+ function chooseFile(e){const f=e.target.files?.[0];setFile(f||null);setResult(null);setMessage('');if(preview)URL.revokeObjectURL(preview);setPreview(f?URL.createObjectURL(f):'')}
+ function analyze(){if(!file)return setMessage('Prenez une photo ou choisissez un document.');const restaurant=file.name.toLowerCase().includes('parc')?'La Maison du Parc':'Villa Valleyre';setResult(type==='invoice'?{restaurant,supplier:'Fournisseur test',category:'Épicerie',date:new Date().toISOString().slice(0,10),number:'TEST-001',ht:'125.00',vat:'12.50',ttc:'137.50'}:{restaurant,date:new Date().toISOString().slice(0,10),ca:'1840.00',covers:'52',lunch:'0',dinner:'1840.00'});setMessage('Analyse de démonstration terminée : vérifiez et corrigez les attributions ci-dessous.')}
+ function change(k,v){setResult(r=>({...r,[k]:v}))}
+ function validate(){setMessage(type==='invoice'?'TEST OK — la facture serait classée dans Factures fournisseurs et rattachée à '+result.restaurant+'.':'TEST OK — le Z serait affecté au CA journalier et aux couverts de '+result.restaurant+'.')}
+ return <main style={{minHeight:'100vh',background:'#f4f1e9',padding:24,fontFamily:'Arial,sans-serif',color:'#24372d'}}><div style={{maxWidth:720,margin:'0 auto'}}><a href="/" style={{color:'#52684e',textDecoration:'none'}}>← Retour au pilotage</a><div style={{marginTop:18,background:'#fff4cf',padding:'10px 14px',borderRadius:10,fontSize:13}}><b>MODE ESSAI</b> · aucune donnée réelle n’est enregistrée</div><h1 style={{fontFamily:'Georgia,serif',fontSize:34,marginBottom:4}}>Scanner un document</h1><p style={{marginTop:0,color:'#68736b'}}>Test du classement et des attributions Maison Oddos</p><div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,margin:'24px 0'}}><button onClick={()=>{setType('invoice');setResult(null)}} style={btn(type==='invoice')}>Facture fournisseur</button><button onClick={()=>{setType('z');setResult(null)}} style={btn(type==='z')}>Z de caisse</button></div><section style={card}><h2>{type==='invoice'?'Photographier une facture':'Photographier le Z de caisse'}</h2><label style={{display:'block',border:'2px dashed #a6ad9d',borderRadius:14,padding:28,textAlign:'center',cursor:'pointer',margin:'20px 0'}}><b>📷 Prendre une photo</b><br/><small>ou sélectionner une image / un PDF</small><input type="file" accept="image/*,application/pdf" capture="environment" onChange={chooseFile} style={{display:'none'}}/></label>{file&&<div style={{background:'#f7f6f1',padding:12,borderRadius:10,marginBottom:14}}><b>{file.name}</b><br/><small>{Math.round(file.size/1024)} Ko</small></div>}{preview&&file?.type?.startsWith('image/')&&<img src={preview} alt="Aperçu" style={{width:'100%',maxHeight:380,objectFit:'contain',borderRadius:12,marginBottom:14}}/>}<button onClick={analyze} style={{...btn(true),width:'100%',padding:14}}>Analyser le document</button>{message&&<p style={{background:'#eef2e9',padding:12,borderRadius:10}}>{message}</p>}</section>{result&&<section style={{...card,marginTop:18}}><h2>Attribution proposée</h2><p style={{color:'#68736b'}}>Tous les champs restent modifiables avant validation.</p><Field label="Établissement"><select value={result.restaurant} onChange={e=>change('restaurant',e.target.value)}>{restaurants.map(x=><option key={x}>{x}</option>)}</select></Field>{type==='invoice'?<><Input l="Fournisseur" k="supplier" r={result} c={change}/><Field label="Catégorie"><select value={result.category} onChange={e=>change('category',e.target.value)}>{['Viandes','Poissons','Fruits & légumes','Épicerie','Produits laitiers','Boissons','Vins','Autres'].map(x=><option key={x}>{x}</option>)}</select></Field><Input l="Date facture" k="date" type="date" r={result} c={change}/><Input l="N° facture" k="number" r={result} c={change}/><Input l="Montant HT" k="ht" type="number" r={result} c={change}/><Input l="TVA" k="vat" type="number" r={result} c={change}/><Input l="Montant TTC" k="ttc" type="number" r={result} c={change}/><div style={destination}><b>Destination :</b> Factures fournisseurs → {result.restaurant} → {result.category}</div></>:<><Input l="Date du Z" k="date" type="date" r={result} c={change}/><Input l="CA HT" k="ca" type="number" r={result} c={change}/><Input l="Nombre de couverts" k="covers" type="number" r={result} c={change}/><Input l="CA midi" k="lunch" type="number" r={result} c={change}/><Input l="CA soir" k="dinner" type="number" r={result} c={change}/><div style={destination}><b>Destination :</b> CA journalier → {result.restaurant} → {result.date} · Couverts : {result.covers}</div></>}<button onClick={validate} style={{...btn(true),width:'100%',padding:14,marginTop:14}}>Valider le test d’attribution</button></section>}<section style={{marginTop:18,padding:18,border:'1px solid #d8d8cf',borderRadius:14}}><b>Important</b><p style={{marginBottom:0}}>Cette version teste le parcours, les cases et le classement. Les valeurs affichées après analyse sont encore des valeurs de démonstration : la lecture réelle du contenu de la photo sera branchée ensuite.</p></section></div></main>}
+function Input({l,k,type='text',r,c}){return <Field label={l}><input type={type} step={type==='number'?'0.01':undefined} value={r[k]} onChange={e=>c(k,e.target.value)}/></Field>}
+function Field({label,children}){return <label style={{display:'block',fontWeight:700,margin:'12px 0'}}>{label}{children&&<div style={{marginTop:6}}>{children}</div>}</label>}
+const card={background:'white',borderRadius:18,padding:22,boxShadow:'0 8px 28px rgba(0,0,0,.08)'}
+const destination={background:'#edf3eb',border:'1px solid #cbd8c6',borderRadius:12,padding:14,marginTop:16}
+function btn(active){return{border:0,borderRadius:12,padding:'12px 10px',fontWeight:700,cursor:'pointer',background:active?'#405944':'#dedfd7',color:active?'white':'#344238'}}
