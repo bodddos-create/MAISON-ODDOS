@@ -10,10 +10,11 @@ export default function TTCDisplayEnhancer(){
   let stopped=false,timer
   const run=async()=>{
    const {data:{user}}=await sb.auth.getUser(); if(!user||stopped)return
-   const [{data:sales},{data:vat},{data:invoices}]=await Promise.all([
+   const [{data:sales},{data:vat},{data:invoices},{data:employees}]=await Promise.all([
     sb.from('daily_sales').select('id,establishment_id,business_date,lunch_sales_ht,dinner_sales_ht,lunch_covers,dinner_covers'),
     sb.from('daily_sale_vat_lines').select('daily_sale_id,amount_ttc'),
-    sb.from('supplier_invoices').select('establishment_id,amount_ht,vat_amount')
+    sb.from('supplier_invoices').select('establishment_id,amount_ht,vat_amount'),
+    sb.from('employees').select('establishment_id,monthly_loaded_cost,active').eq('active',true)
    ])
    const vatBySale={}; (vat||[]).forEach(v=>vatBySale[v.daily_sale_id]=(vatBySale[v.daily_sale_id]||0)+Number(v.amount_ttc||0))
    const rows=(sales||[]).map(s=>{const ht=Number(s.lunch_sales_ht||0)+Number(s.dinner_sales_ht||0);return{...s,ttc:Object.prototype.hasOwnProperty.call(vatBySale,s.id)?vatBySale[s.id]:ht,covers:Number(s.lunch_covers||0)+Number(s.dinner_covers||0)}})
@@ -21,11 +22,15 @@ export default function TTCDisplayEnhancer(){
     if(stopped)return
     const main=document.querySelector('main'); if(!main)return
     const estSelect=[...main.querySelectorAll('select')].find(x=>[...x.options].some(o=>o.textContent?.includes('CONSOLIDÉ')))
-    const est=estSelect?.value||'all', filtered=est==='all'?rows:rows.filter(x=>x.establishment_id===est), inv=est==='all'?(invoices||[]):(invoices||[]).filter(x=>x.establishment_id===est)
-    const ca=filtered.reduce((a,x)=>a+x.ttc,0),covers=filtered.reduce((a,x)=>a+x.covers,0),days=new Set(filtered.filter(x=>x.ttc>0).map(x=>x.business_date)).size,avg=days?ca/days:0,achats=inv.reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)
+    const est=estSelect?.value||'all', filtered=est==='all'?rows:rows.filter(x=>x.establishment_id===est), inv=est==='all'?(invoices||[]):(invoices||[]).filter(x=>x.establishment_id===est), emps=est==='all'?(employees||[]):(employees||[]).filter(x=>x.establishment_id===est)
+    const ca=filtered.reduce((a,x)=>a+x.ttc,0),covers=filtered.reduce((a,x)=>a+x.covers,0),days=new Set(filtered.filter(x=>x.ttc>0).map(x=>x.business_date)).size,avg=days?ca/days:0,achats=inv.reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0),payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0),personnelDay=payroll/22
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
     const hero=[...main.querySelectorAll('.hero small')].find(x=>x.textContent?.includes("Chiffre d’affaires")); if(hero){hero.textContent="Chiffre d’affaires TTC enregistré";const h=hero.parentElement?.querySelector('h2');if(h)h.textContent=money(ca)}
-    setCard('CA estimé sur 22 jours',money(avg*22)); setCard('CA moyen / jour',money(avg)); setCard('Ticket moyen',money(covers?ca/covers:0)); setCard('Achats',money(achats))
+    setCard('CA estimé sur 22 jours',money(avg*22)); setCard('CA estimé sur 22 jours TTC',money(avg*22));
+    setCard('CA moyen / jour',money(avg)); setCard('CA moyen / jour TTC',money(avg));
+    setCard('Ticket moyen',money(covers?ca/covers:0)); setCard('Ticket moyen TTC',money(covers?ca/covers:0));
+    setCard('Achats',money(achats)); setCard('Achats TTC',money(achats));
+    setCard('Personnel',money(personnelDay));
     ;[...main.querySelectorAll('.card span')].forEach(s=>{if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
     ;[...main.querySelectorAll('th')].forEach(th=>{if(th.textContent==='CA HT')th.textContent='CA TTC'})
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
