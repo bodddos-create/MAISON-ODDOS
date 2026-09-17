@@ -3,6 +3,9 @@ import {useEffect,useState} from 'react'
 import {createClient} from '@supabase/supabase-js'
 const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE')
 const euro=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
+const VILLA='8395bf22-99cb-4a7b-9096-ca734d583d83',PARC='55c6e880-aa0c-40d6-9065-b5315b1a602a'
+const openDay=(id,d)=>id===VILLA?(d>=2&&d<=6):id===PARC?(d>=1&&d<=6):(d>=1&&d<=6)
+const openDays=(id,date=new Date())=>{const y=date.getFullYear(),m=date.getMonth(),n=new Date(y,m+1,0).getDate();let c=0;for(let i=1;i<=n;i++)if(openDay(id,new Date(y,m,i).getDay()))c++;return c||1}
 export default function PersonnelDailyCost(){
  const [data,setData]=useState(null),[show,setShow]=useState(false)
  useEffect(()=>{let alive=true
@@ -12,7 +15,7 @@ export default function PersonnelDailyCost(){
   check();const o=new MutationObserver(check);o.observe(document.body,{subtree:true,attributes:true,attributeFilter:['class']});return()=>{alive=false;o.disconnect()}
  },[])
  if(!show||!data)return null
- const total=data.employees.reduce((a,e)=>a+Number(e.monthly_loaded_cost||0),0)
- const byEst=data.ests.map(est=>{const emps=data.employees.filter(e=>e.establishment_id===est.id),monthly=emps.reduce((a,e)=>a+Number(e.monthly_loaded_cost||0),0);return{...est,emps,monthly,daily:monthly/22}}).filter(x=>x.emps.length)
- return <section style={{paddingTop:0}}><div className="formCard" style={{marginTop:18}}><h3 style={{marginTop:0}}>Coût personnel moyen / jour</h3><p><b>{euro(total/22)}</b> / jour — masse salariale chargée active ÷ 22 jours</p><div className="grid">{byEst.map(x=><article className="card" key={x.id}><span>{x.name}</span><strong>{euro(x.daily)} / jour</strong><small>{euro(x.monthly)} / mois ÷ 22</small></article>)}</div></div></section>
+ const byEst=data.ests.map(est=>{const emps=data.employees.filter(e=>e.establishment_id===est.id),monthly=emps.reduce((a,e)=>a+Number(e.monthly_loaded_cost||0),0),days=openDays(est.id);return{...est,emps,monthly,days,daily:monthly/days}}).filter(x=>x.emps.length)
+ const totalMonthly=byEst.reduce((a,x)=>a+x.monthly,0),totalDaily=byEst.reduce((a,x)=>a+x.daily,0)
+ return <section style={{paddingTop:0}}><div className="formCard" style={{marginTop:18}}><h3 style={{marginTop:0}}>Coût personnel moyen / jour d’ouverture</h3><p><b>{euro(totalDaily)}</b> / jour — calculé selon les jours d’ouverture réels du mois</p><div className="grid">{byEst.map(x=><article className="card" key={x.id}><span>{x.name}</span><strong>{euro(x.daily)} / jour</strong><small>{euro(x.monthly)} / mois ÷ {x.days} jours d’ouverture</small></article>)}</div><small>Masse salariale chargée active totale : {euro(totalMonthly)}</small></div></section>
 }
