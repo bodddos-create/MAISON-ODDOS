@@ -4,7 +4,7 @@ import {createClient} from '@supabase/supabase-js'
 const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE')
 const euro=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
 const today=()=>new Date().toISOString().slice(0,10)
-const cats=['Viandes','Poissons','Fruits & légumes','Épicerie','Produits laitiers','Boissons','Vins','Carburant','Autres']
+const cats=['Alimentaire','Boissons','Consommable','Entretien','Mobilier','Energie','Assurance','Telephonie']
 const inputStyle={width:'100%',boxSizing:'border-box',padding:11,marginTop:6}
 export default function Home(){
  const [user,setUser]=useState(undefined),[email,setEmail]=useState(''),[password,setPassword]=useState(''),[authMsg,setAuthMsg]=useState(''),[busy,setBusy]=useState(false)
