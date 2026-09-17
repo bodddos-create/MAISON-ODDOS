@@ -4,6 +4,10 @@ import {createClient} from '@supabase/supabase-js'
 
 const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE')
 const money=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
+const VILLA='8395bf22-99cb-4a7b-9096-ca734d583d83'
+const PARC='55c6e880-aa0c-40d6-9065-b5315b1a602a'
+const isOpen=(est,date)=>{const d=date.getDay();if(est===VILLA)return d>=2&&d<=6;if(est===PARC)return d>=1&&d<=6;return d>=1&&d<=6}
+const openDaysInMonth=(est,ym)=>{const [y,m]=ym.split('-').map(Number),days=new Date(y,m,0).getDate();let n=0;for(let i=1;i<=days;i++)if(isOpen(est,new Date(y,m-1,i)))n++;return n||1}
 
 export default function TTCDisplayEnhancer(){
  useEffect(()=>{
@@ -24,6 +28,8 @@ export default function TTCDisplayEnhancer(){
     const main=document.querySelector('main'); if(!main)return
     const estSelect=[...main.querySelectorAll('select')].find(x=>[...x.options].some(o=>o.textContent?.includes('CONSOLIDÉ')))
     const est=estSelect?.value||'all'
+    const monthInput=main.querySelector('input[type="month"]')
+    const ym=monthInput?.value||new Date().toISOString().slice(0,7)
     const filtered=est==='all'?rows:rows.filter(x=>x.establishment_id===est)
     const inv=est==='all'?(invoices||[]):(invoices||[]).filter(x=>x.establishment_id===est)
     const emps=est==='all'?(employees||[]):(employees||[]).filter(x=>x.establishment_id===est)
@@ -34,7 +40,8 @@ export default function TTCDisplayEnhancer(){
     const avg=days?ca/days:0
     const achats=inv.reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)
     const payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0)
-    const personnelDay=payroll/22
+    const payrollByEst={};emps.forEach(e=>payrollByEst[e.establishment_id]=(payrollByEst[e.establishment_id]||0)+Number(e.monthly_loaded_cost||0))
+    const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/openDaysInMonth(id,ym),0)
     const fixedTotal=fixes.reduce((a,x)=>a+Number(x.amount||0),0)
     const estimatedResult=ca-achats-payroll-fixedTotal
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
@@ -44,10 +51,10 @@ export default function TTCDisplayEnhancer(){
     setCard('CA moyen / jour',money(avg)); setCard('CA moyen / jour TTC',money(avg))
     setCard('Ticket moyen',money(covers?ca/covers:0)); setCard('Ticket moyen TTC',money(covers?ca/covers:0))
     setCard('Achats',money(achats)); setCard('Achats TTC',money(achats))
-    setCard('Personnel',money(personnelDay)); setCard('Personnel moyen / jour (22j)',money(personnelDay))
+    setCard('Personnel',money(personnelDay)); setCard('Personnel moyen / jour (22j)',money(personnelDay));setCard('Personnel moyen / jour',money(personnelDay))
     setCard('Charges fixes',money(fixedTotal))
     setCard('Marge après charges',money(estimatedResult))
-    ;[...main.querySelectorAll('.card span')].forEach(s=>{if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
+    ;[...main.querySelectorAll('.card span')].forEach(s=>{if(s.textContent==='Personnel moyen / jour (22j)')s.textContent='Personnel moyen / jour d’ouverture';if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
     ;[...main.querySelectorAll('th')].forEach(th=>{if(th.textContent==='CA HT')th.textContent='CA TTC'})
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
    }
