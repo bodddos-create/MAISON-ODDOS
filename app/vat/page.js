@@ -5,7 +5,7 @@ const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable
 const euro=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
 const today=()=>new Date().toISOString().slice(0,10)
 const input={width:'100%',boxSizing:'border-box',padding:10,marginTop:5}
-const cats=['Alimentaire','Boissons','Consommable','Entretien','Mobilier','Energie','Assurance','Telephonie']
+const cats=['Alimentaire','Boissons','Consommable','Entretien','Mobilier','Energie','Assurance','Telephonie','TPE','Logiciel caisse']
 const payments=['Espèces','CB','CB diff','Reflex','Prélèvement','Virement','Chèque']
 const line=()=>({vat_rate:'',amount_ht:''})
 const calc=l=>{const ht=Number(l.amount_ht||0),rate=Number(l.vat_rate||0),vat=Math.round(ht*rate)/100;return{ht,rate,vat,ttc:ht+vat}}
