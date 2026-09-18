@@ -10,7 +10,7 @@ export default function InvoiceTabRouter(){
    if(!b)return
    const text=b.textContent.trim()
    if(text==='Factures'){e.preventDefault();e.stopPropagation();router.push('/factures');return}
-   if(text==='Facture'){
+   if(text==='Facture'||text==='Z de caisse'){
     e.preventDefault();e.stopPropagation();router.push('/vat')
    }
   }
