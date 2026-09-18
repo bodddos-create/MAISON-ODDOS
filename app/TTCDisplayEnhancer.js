@@ -17,9 +17,9 @@ export default function TTCDisplayEnhancer(){
    const [{data:sales},{data:vat},{data:invoices},{data:employees},{data:fixedCharges}]=await Promise.all([
     sb.from('daily_sales').select('id,establishment_id,business_date,lunch_sales_ht,dinner_sales_ht,lunch_covers,dinner_covers'),
     sb.from('daily_sale_vat_lines').select('daily_sale_id,amount_ttc'),
-    sb.from('supplier_invoices').select('establishment_id,amount_ht,vat_amount'),
+    sb.from('supplier_invoices').select('establishment_id,invoice_date,amount_ht,vat_amount'),
     sb.from('employees').select('establishment_id,monthly_loaded_cost,active').eq('active',true),
-    sb.from('fixed_charges').select('establishment_id,amount')
+    sb.from('fixed_charges').select('establishment_id,month,amount')
    ])
    const vatBySale={}; (vat||[]).forEach(v=>vatBySale[v.daily_sale_id]=(vatBySale[v.daily_sale_id]||0)+Number(v.amount_ttc||0))
    const rows=(sales||[]).map(s=>{const ht=Number(s.lunch_sales_ht||0)+Number(s.dinner_sales_ht||0);return{...s,ttc:Object.prototype.hasOwnProperty.call(vatBySale,s.id)?vatBySale[s.id]:ht,covers:Number(s.lunch_covers||0)+Number(s.dinner_covers||0)}})
@@ -44,6 +44,12 @@ export default function TTCDisplayEnhancer(){
     const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/openDaysInMonth(id,ym),0)
     const fixedTotal=fixes.reduce((a,x)=>a+Number(x.amount||0),0)
     const estimatedResult=ca-achats-payroll-fixedTotal
+    const estIds=est==='all'?[VILLA,PARC]:[est]
+    const monthInv=inv.filter(x=>String(x.invoice_date||'').slice(0,7)===ym)
+    const monthFix=fixes.filter(x=>String(x.month||'').slice(0,7)===ym)
+    const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/openDaysInMonth(id,ym),0)
+    const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount||0),0)/openDaysInMonth(id,ym),0)
+    const dailyCost=personnelDay+dailyPurchases+dailyFixed
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
     const hero=[...main.querySelectorAll('.hero small')].find(x=>x.textContent?.includes("Chiffre d’affaires")); if(hero){hero.textContent="Chiffre d’affaires TTC enregistré";const h=hero.parentElement?.querySelector('h2');if(h)h.textContent=money(ca)}
     const result=main.querySelector('.hero .result strong');if(result)result.textContent=money(estimatedResult)
@@ -54,6 +60,7 @@ export default function TTCDisplayEnhancer(){
     setCard('Personnel',money(personnelDay)); setCard('Personnel moyen / jour (22j)',money(personnelDay));setCard('Personnel moyen / jour',money(personnelDay))
     setCard('Charges fixes',money(fixedTotal))
     setCard('Marge après charges',money(estimatedResult))
+    const dailyCostCard=main.querySelector('[data-daily-cost="true"] strong');if(dailyCostCard)dailyCostCard.textContent=money(dailyCost)
     ;[...main.querySelectorAll('.card span')].forEach(s=>{if(s.textContent==='Personnel moyen / jour (22j)')s.textContent='Personnel moyen / jour d’ouverture';if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
     ;[...main.querySelectorAll('th')].forEach(th=>{if(th.textContent==='CA HT')th.textContent='CA TTC'})
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
