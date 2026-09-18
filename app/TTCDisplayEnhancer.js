@@ -60,6 +60,7 @@ export default function TTCDisplayEnhancer(){
     setCard('CA moyen / jour',money(avg)); setCard('CA moyen / jour TTC',money(avg))
     setCard('Ticket moyen',money(covers?ca/covers:0)); setCard('Ticket moyen TTC',money(covers?ca/covers:0))
     setCard('Achats',money(achats)); setCard('Achats TTC',money(achats))
+    const purchaseCard=[...main.querySelectorAll('.card')].find(c=>c.querySelector('span')?.textContent?.trim()==='Achats TTC');if(purchaseCard){let pct=purchaseCard.querySelector('[data-purchase-rate]');if(!pct){pct=document.createElement('div');pct.dataset.purchaseRate='true';pct.style.cssText='margin-top:8px;font-size:13px;font-weight:800;padding:5px 9px;border-radius:8px;display:inline-block;color:#2f6b3a;background:#e8f3e8';purchaseCard.appendChild(pct)}pct.textContent=(ca?((achats/ca)*100).toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}):'0,00')+' % du CA de vente'}
     setCard('Personnel',money(personnelDay)); setCard('Personnel moyen / jour (22j)',money(personnelDay));setCard('Personnel moyen / jour',money(personnelDay))
     setCard('Charges fixes',money(fixedTotal))
     setCard('Marge après charges',money(estimatedResult))
