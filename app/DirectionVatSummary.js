@@ -22,7 +22,7 @@ export default function DirectionVatSummary(){
    const collected=(svat||[]).filter(x=>ids.has(x.daily_sale_id)).reduce((a,x)=>a+Number(x.vat_amount||0),0)
    const purchases=(inv||[]).filter(x=>x.invoice_date?.startsWith(ym)&&(est==='all'||x.establishment_id===est)).reduce((a,x)=>a+Number(x.vat_amount||0),0)
    const applies=x=>{const s=String(x.month||'').slice(0,7),e=String(x.end_month||'').slice(0,7);return (est==='all'||x.establishment_id===est)&&(x.recurring?s<=ym&&(!e||e>=ym):s===ym)}
-   const charges=(fix||[]).filter(applies).reduce((a,x)=>a+Math.max(0,Number(x.amount_ttc??x.amount||0)-Number(x.amount||0)),0)
+   const charges=(fix||[]).filter(applies).reduce((a,x)=>a+Math.max(0,Number(x.amount_ttc ?? x.amount ?? 0)-Number(x.amount||0)),0)
    if(!stop)setData({ym,collected,purchases,charges,net:collected-purchases-charges})
   }
   load();const t=setInterval(load,3000);window.addEventListener('pilotage-refresh',load);return()=>{stop=true;clearInterval(t);window.removeEventListener('pilotage-refresh',load)}
