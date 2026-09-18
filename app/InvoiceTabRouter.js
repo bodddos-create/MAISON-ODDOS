@@ -10,9 +10,8 @@ export default function InvoiceTabRouter(){
    if(!b)return
    const text=b.textContent.trim()
    if(text==='Factures'){e.preventDefault();e.stopPropagation();router.push('/factures');return}
-   if(text==='Facture'||text==='Z de caisse'){
-    e.preventDefault();e.stopPropagation();router.push('/vat')
-   }
+   if(text==='FACTURE'||text==='Facture'){e.preventDefault();e.stopPropagation();router.push('/vat?type=invoice');return}
+   if(text==='Z CAISSE'||text==='Z de caisse'){e.preventDefault();e.stopPropagation();router.push('/vat?type=z');return}
   }
   document.addEventListener('click',click,true)
   return()=>document.removeEventListener('click',click,true)
