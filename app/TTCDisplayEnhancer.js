@@ -49,7 +49,7 @@ export default function TTCDisplayEnhancer(){
     const monthFix=monthFixes
     const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/openDaysInMonth(id,ym),0)
     const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)/openDaysInMonth(id,ym),0)
-    const dailyCost=personnelDay+dailyPurchases+dailyFixed
+    const dailyFixedPersonnel=personnelDay+dailyFixed\n    const dailyCost=personnelDay+dailyPurchases+dailyFixed
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
     const hero=[...main.querySelectorAll('.hero small')].find(x=>x.textContent?.includes("Chiffre d’affaires")); if(hero){hero.textContent="Chiffre d’affaires TTC enregistré";const h=hero.parentElement?.querySelector('h2');if(h)h.textContent=money(ca)}
     const result=main.querySelector('.hero .result strong');if(result)result.textContent=money(estimatedResult)
@@ -60,7 +60,7 @@ export default function TTCDisplayEnhancer(){
     setCard('Personnel',money(personnelDay)); setCard('Personnel moyen / jour (22j)',money(personnelDay));setCard('Personnel moyen / jour',money(personnelDay))
     setCard('Charges fixes',money(fixedTotal))
     setCard('Marge après charges',money(estimatedResult))
-    const dailyCostCard=main.querySelector('[data-daily-cost="true"] strong');if(dailyCostCard)dailyCostCard.textContent=money(dailyCost)
+    const fixedPersonnelCard=main.querySelector('[data-daily-fixed-personnel="true"] strong');if(fixedPersonnelCard)fixedPersonnelCard.textContent=money(dailyFixedPersonnel)\n    const dailyCostCard=main.querySelector('[data-daily-cost="true"] strong');if(dailyCostCard)dailyCostCard.textContent=money(dailyCost)
     ;[...main.querySelectorAll('.card span')].forEach(s=>{if(s.textContent==='Personnel moyen / jour (22j)')s.textContent='Personnel moyen / jour d’ouverture';if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
     ;[...main.querySelectorAll('th')].forEach(th=>{if(th.textContent==='CA HT')th.textContent='CA TTC'})
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
