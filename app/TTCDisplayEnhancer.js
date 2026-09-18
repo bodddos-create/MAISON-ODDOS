@@ -14,12 +14,13 @@ export default function TTCDisplayEnhancer(){
   let stopped=false,timer
   const run=async()=>{
    const {data:{user}}=await sb.auth.getUser(); if(!user||stopped)return
-   const [{data:sales},{data:vat},{data:invoices},{data:employees},{data:fixedCharges}]=await Promise.all([
+   const [{data:sales},{data:vat},{data:invoices},{data:employees},{data:fixedCharges},{data:openingDays}]=await Promise.all([
     sb.from('daily_sales').select('id,establishment_id,business_date,lunch_sales_ht,dinner_sales_ht,lunch_covers,dinner_covers'),
     sb.from('daily_sale_vat_lines').select('daily_sale_id,amount_ttc'),
     sb.from('supplier_invoices').select('establishment_id,invoice_date,amount_ht,vat_amount'),
     sb.from('employees').select('establishment_id,monthly_loaded_cost,active').eq('active',true),
-    sb.from('fixed_charges').select('establishment_id,month,end_month,recurring,amount,amount_ttc')
+    sb.from('fixed_charges').select('establishment_id,month,end_month,recurring,amount,amount_ttc'),
+    sb.from('opening_days').select('establishment_id,business_date,is_open')
    ])
    const vatBySale={}; (vat||[]).forEach(v=>vatBySale[v.daily_sale_id]=(vatBySale[v.daily_sale_id]||0)+Number(v.amount_ttc||0))
    const rows=(sales||[]).map(s=>{const ht=Number(s.lunch_sales_ht||0)+Number(s.dinner_sales_ht||0);return{...s,ttc:Object.prototype.hasOwnProperty.call(vatBySale,s.id)?vatBySale[s.id]:ht,covers:Number(s.lunch_covers||0)+Number(s.dinner_covers||0)}})
@@ -41,13 +42,14 @@ export default function TTCDisplayEnhancer(){
     const achats=inv.reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)
     const payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0)
     const payrollByEst={};emps.forEach(e=>payrollByEst[e.establishment_id]=(payrollByEst[e.establishment_id]||0)+Number(e.monthly_loaded_cost||0))
-    const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/openDaysInMonth(id,ym),0)
+    const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/realOpenDays(id),0)
     const chargeApplies=(x,m)=>{const start=String(x.month||'').slice(0,7),end=String(x.end_month||'').slice(0,7);return x.recurring?start<=m&&(!end||end>=m):start===m};const monthFixes=fixes.filter(x=>chargeApplies(x,ym));const fixedTotal=monthFixes.reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)
     const estimatedResult=ca-achats-payroll-fixedTotal
     const estIds=est==='all'?[VILLA,PARC]:[est]
+    const realOpenDays=id=>{const custom=(openingDays||[]).filter(x=>x.establishment_id===id&&String(x.business_date).startsWith(ym));if(custom.length){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate(),by=Object.fromEntries(custom.map(x=>[x.business_date,x.is_open]));let total=0;for(let d=1;d<=n;d++){const ds=ym+'-'+String(d).padStart(2,'0');if(ds in by?by[ds]:isOpen(id,new Date(y,m-1,d)))total++}return total||1}return openDaysInMonth(id,ym)}
     const monthInv=inv.filter(x=>String(x.invoice_date||'').slice(0,7)===ym)
     const monthFix=monthFixes
-    const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/openDaysInMonth(id,ym),0)
+    const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/realOpenDays(id),0)
     const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)/openDaysInMonth(id,ym),0)
     const dailyFixedPersonnel=personnelDay+dailyFixed
     const dailyCost=personnelDay+dailyPurchases+dailyFixed
