@@ -40,7 +40,8 @@ export default function TTCDisplayEnhancer(){
     const days=new Set(filtered.filter(x=>x.ttc>0).map(x=>x.business_date)).size
     const avg=days?ca/days:0
     const achats=inv.reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)
-    const realOpenDays=id=>{const custom=(openingDays||[]).filter(x=>x.establishment_id===id&&String(x.business_date).startsWith(ym));if(custom.length){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate(),by=Object.fromEntries(custom.map(x=>[x.business_date,x.is_open]));let total=0;for(let d=1;d<=n;d++){const ds=ym+'-'+String(d).padStart(2,'0');if(ds in by?by[ds]:isOpen(id,new Date(y,m-1,d)))total++}return total||1}return openDaysInMonth(id,ym)}\n    const payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0)
+    const realOpenDays=id=>{const custom=(openingDays||[]).filter(x=>x.establishment_id===id&&String(x.business_date).startsWith(ym));if(custom.length){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate(),by=Object.fromEntries(custom.map(x=>[x.business_date,x.is_open]));let total=0;for(let d=1;d<=n;d++){const ds=ym+'-'+String(d).padStart(2,'0');if(ds in by?by[ds]:isOpen(id,new Date(y,m-1,d)))total++}return total||1}return openDaysInMonth(id,ym)}
+    const payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0)
     const payrollByEst={};emps.forEach(e=>payrollByEst[e.establishment_id]=(payrollByEst[e.establishment_id]||0)+Number(e.monthly_loaded_cost||0))
     const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/realOpenDays(id),0)
     const chargeApplies=(x,m)=>{const start=String(x.month||'').slice(0,7),end=String(x.end_month||'').slice(0,7);return x.recurring?start<=m&&(!end||end>=m):start===m};const monthFixes=fixes.filter(x=>chargeApplies(x,ym));const fixedTotal=monthFixes.reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)
@@ -49,7 +50,7 @@ export default function TTCDisplayEnhancer(){
     const monthInv=inv.filter(x=>String(x.invoice_date||'').slice(0,7)===ym)
     const monthFix=monthFixes
     const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/realOpenDays(id),0)
-    const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0/realOpenDays(id),0)
+    const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)/realOpenDays(id),0)
     const dailyFixedPersonnel=personnelDay+dailyFixed
     const dailyCost=personnelDay+dailyPurchases+dailyFixed
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
