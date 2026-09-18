@@ -1,6 +1,5 @@
 'use client'
 import {useEffect,useMemo,useState} from 'react'
-import {useSearchParams} from 'next/navigation'
 import {createClient} from '@supabase/supabase-js'
 const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE')
 const euro=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
@@ -11,11 +10,10 @@ const payments=['Espèces','CB','CB diff','Reflex','Prélèvement','Virement','C
 const line=()=>({vat_rate:'',amount_ht:''})
 const calc=l=>{const ht=Number(l.amount_ht||0),rate=Number(l.vat_rate||0),vat=Math.round(ht*rate)/100;return{ht,rate,vat,ttc:ht+vat}}
 export default function VatPage(){
- const searchParams=useSearchParams()
  const [user,setUser]=useState(undefined),[ests,setEsts]=useState([]),[type,setType]=useState('invoice'),[msg,setMsg]=useState(''),[saving,setSaving]=useState(false),[lines,setLines]=useState([line()]),[zRows,setZRows]=useState([]),[editingZ,setEditingZ]=useState(null)
  const [inv,setInv]=useState({establishment_id:'',invoice_date:today(),supplier:'',category:'',invoice_number:'',payment_method:'',due_date:'',paid:false})
  const [z,setZ]=useState({establishment_id:'',business_date:today(),lunch_covers:'',dinner_covers:'',staff_hours:'',staff_cost:''})
- useEffect(()=>{const requested=searchParams.get('type');if(requested==='z'||requested==='invoice')setType(requested)},[searchParams])
+ useEffect(()=>{const requested=new URLSearchParams(window.location.search).get('type');if(requested==='z'||requested==='invoice')setType(requested)},[])
  useEffect(()=>{sb.auth.getUser().then(({data})=>setUser(data?.user||null))},[])
  useEffect(()=>{if(user){sb.from('establishments').select('*').eq('active',true).then(({data})=>{setEsts(data||[]);if(data?.[0]){setInv(v=>({...v,establishment_id:v.establishment_id||data[0].id}));setZ(v=>({...v,establishment_id:v.establishment_id||data[0].id}))}});loadZ()}},[user])
  async function loadZ(){const {data}=await sb.from('daily_sales').select('id,establishment_id,business_date,lunch_covers,dinner_covers,staff_hours,staff_cost,lunch_sales_ht,dinner_sales_ht').order('business_date',{ascending:false}).limit(100);const sales=data||[];if(!sales.length)return setZRows([]);const {data:vat}=await sb.from('daily_sale_vat_lines').select('daily_sale_id,vat_amount').in('daily_sale_id',sales.map(x=>x.id));const vatBy={};(vat||[]).forEach(v=>vatBy[v.daily_sale_id]=(vatBy[v.daily_sale_id]||0)+Number(v.vat_amount||0));setZRows(sales.map(x=>({...x,vat_amount:vatBy[x.id]||0})))}
