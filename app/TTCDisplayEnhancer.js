@@ -46,7 +46,6 @@ export default function TTCDisplayEnhancer(){
     const chargeApplies=(x,m)=>{const start=String(x.month||'').slice(0,7),end=String(x.end_month||'').slice(0,7);return x.recurring?start<=m&&(!end||end>=m):start===m};const monthFixes=fixes.filter(x=>chargeApplies(x,ym));const fixedTotal=monthFixes.reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)
     const estimatedResult=ca-achats-payroll-fixedTotal
     const estIds=est==='all'?[VILLA,PARC]:[est]
-    const realOpenDays=id=>{const custom=(openingDays||[]).filter(x=>x.establishment_id===id&&String(x.business_date).startsWith(ym));if(custom.length){const [y,m]=ym.split('-').map(Number),n=new Date(y,m,0).getDate(),by=Object.fromEntries(custom.map(x=>[x.business_date,x.is_open]));let total=0;for(let d=1;d<=n;d++){const ds=ym+'-'+String(d).padStart(2,'0');if(ds in by?by[ds]:isOpen(id,new Date(y,m-1,d)))total++}return total||1}return openDaysInMonth(id,ym)}
     const monthInv=inv.filter(x=>String(x.invoice_date||'').slice(0,7)===ym)
     const monthFix=monthFixes
     const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/realOpenDays(id),0)
