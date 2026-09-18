@@ -67,6 +67,12 @@ export default function TTCDisplayEnhancer(){
     const dailyCostCard=main.querySelector('[data-daily-cost="true"] strong');if(dailyCostCard)dailyCostCard.textContent=money(dailyCost)
     ;[...main.querySelectorAll('.card span')].forEach(s=>{if(s.textContent==='Personnel moyen / jour (22j)')s.textContent='Personnel moyen / jour d’ouverture';if(['CA estimé sur 22 jours','CA moyen / jour','Ticket moyen','Achats'].includes(s.textContent)&&!s.textContent.includes('TTC'))s.textContent+=' TTC'})
     ;[...main.querySelectorAll('th')].forEach(th=>{if(th.textContent==='CA HT')th.textContent='CA TTC'})
+    const lastHeading=[...main.querySelectorAll('h3')].find(h=>h.textContent?.trim()==='Dernières journées')
+    const lastTable=lastHeading?.nextElementSibling
+    if(lastTable?.tagName==='TABLE'||lastTable?.querySelector?.('table')){
+     const table=lastTable.tagName==='TABLE'?lastTable:lastTable.querySelector('table')
+     ;[...table.querySelectorAll('tbody tr')].forEach((tr,i)=>{const cells=tr.querySelectorAll('td');const sale=filtered[i];if(cells[2]&&sale)cells[2].textContent=money(sale.ttc)})
+    }
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
    }
    apply(); const obs=new MutationObserver(()=>{clearTimeout(timer);timer=setTimeout(apply,40)});obs.observe(document.body,{childList:true,subtree:true})
