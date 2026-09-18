@@ -19,7 +19,7 @@ export default function TTCDisplayEnhancer(){
     sb.from('daily_sale_vat_lines').select('daily_sale_id,amount_ttc'),
     sb.from('supplier_invoices').select('establishment_id,invoice_date,amount_ht,vat_amount'),
     sb.from('employees').select('establishment_id,monthly_loaded_cost,active').eq('active',true),
-    sb.from('fixed_charges').select('establishment_id,month,end_month,recurring,amount')
+    sb.from('fixed_charges').select('establishment_id,month,end_month,recurring,amount,amount_ttc')
    ])
    const vatBySale={}; (vat||[]).forEach(v=>vatBySale[v.daily_sale_id]=(vatBySale[v.daily_sale_id]||0)+Number(v.amount_ttc||0))
    const rows=(sales||[]).map(s=>{const ht=Number(s.lunch_sales_ht||0)+Number(s.dinner_sales_ht||0);return{...s,ttc:Object.prototype.hasOwnProperty.call(vatBySale,s.id)?vatBySale[s.id]:ht,covers:Number(s.lunch_covers||0)+Number(s.dinner_covers||0)}})
@@ -42,13 +42,13 @@ export default function TTCDisplayEnhancer(){
     const payroll=emps.reduce((a,x)=>a+Number(x.monthly_loaded_cost||0),0)
     const payrollByEst={};emps.forEach(e=>payrollByEst[e.establishment_id]=(payrollByEst[e.establishment_id]||0)+Number(e.monthly_loaded_cost||0))
     const personnelDay=Object.entries(payrollByEst).reduce((sum,[id,total])=>sum+total/openDaysInMonth(id,ym),0)
-    const chargeApplies=(x,m)=>{const start=String(x.month||'').slice(0,7),end=String(x.end_month||'').slice(0,7);return x.recurring?start<=m&&(!end||end>=m):start===m};const monthFixes=fixes.filter(x=>chargeApplies(x,ym));const fixedTotal=monthFixes.reduce((a,x)=>a+Number(x.amount||0),0)
+    const chargeApplies=(x,m)=>{const start=String(x.month||'').slice(0,7),end=String(x.end_month||'').slice(0,7);return x.recurring?start<=m&&(!end||end>=m):start===m};const monthFixes=fixes.filter(x=>chargeApplies(x,ym));const fixedTotal=monthFixes.reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)
     const estimatedResult=ca-achats-payroll-fixedTotal
     const estIds=est==='all'?[VILLA,PARC]:[est]
     const monthInv=inv.filter(x=>String(x.invoice_date||'').slice(0,7)===ym)
     const monthFix=monthFixes
     const dailyPurchases=estIds.reduce((sum,id)=>sum+monthInv.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ht||0)+Number(x.vat_amount||0),0)/openDaysInMonth(id,ym),0)
-    const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount||0),0)/openDaysInMonth(id,ym),0)
+    const dailyFixed=estIds.reduce((sum,id)=>sum+monthFix.filter(x=>x.establishment_id===id).reduce((a,x)=>a+Number(x.amount_ttc!=null?x.amount_ttc:x.amount||0),0)/openDaysInMonth(id,ym),0)
     const dailyCost=personnelDay+dailyPurchases+dailyFixed
     const setCard=(title,val)=>{[...main.querySelectorAll('.card')].forEach(c=>{const s=c.querySelector('span'),b=c.querySelector('strong');if(s?.textContent===title&&b)b.textContent=val})}
     const hero=[...main.querySelectorAll('.hero small')].find(x=>x.textContent?.includes("Chiffre d’affaires")); if(hero){hero.textContent="Chiffre d’affaires TTC enregistré";const h=hero.parentElement?.querySelector('h2');if(h)h.textContent=money(ca)}
