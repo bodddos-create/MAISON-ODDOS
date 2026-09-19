@@ -1,12 +1,351 @@
-import {NextResponse} from 'next/server'
-export const runtime='nodejs'
-const MODEL='openai/gpt-5.6-sol'
-const CATEGORIES=['Alimentaire','Boissons','Consommable','Entretien','Mobilier','Energie','Assurance','Telephonie']
-export async function POST(req){try{const key=process.env.AI_GATEWAY_API_KEY;if(!key)return NextResponse.json({error:'AI Gateway non configuré.'},{status:503});const form=await req.formData(),file=form.get('file'),type=form.get('type')==='z'?'z':'invoice';if(!file||typeof file.arrayBuffer!=='function')return NextResponse.json({error:'Image manquante.'},{status:400});if(!String(file.type||'').startsWith('image/'))return NextResponse.json({error:'Utilisez une photo ou une image.'},{status:400});if(file.size>10*1024*1024)return NextResponse.json({error:'Image trop volumineuse (10 Mo maximum).'},{status:400});const b64=Buffer.from(await file.arrayBuffer()).toString('base64'),schema=type==='invoice'?invoiceSchema:zSchema,instructions=type==='invoice'?invoicePrompt:zPrompt;const body={model:MODEL,messages:[{role:'system',content:'Tu analyses des documents comptables français pour Maison Oddos. Lis uniquement ce qui est visible. N’invente jamais une valeur, un taux ou une ventilation TVA absente ou ambiguë.'},{role:'user',content:[{type:'text',text:instructions},{type:'image_url',image_url:{url:`data:${file.type};base64,${b64}`}}]}],response_format:{type:'json_schema',json_schema:{name:type==='invoice'?'supplier_invoice':'z_report',strict:true,schema}}};const r=await fetch('https://ai-gateway.vercel.sh/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)return NextResponse.json({error:'La lecture IA est momentanément indisponible.'},{status:502});const data=await r.json(),content=data?.choices?.[0]?.message?.content;if(!content)return NextResponse.json({error:'L’IA n’a pas retourné de lecture exploitable.'},{status:502});const parsed=typeof content==='string'?JSON.parse(content):content;return NextResponse.json({ok:true,result:normalize(parsed,type),model:MODEL})}catch(e){console.error('scan-ai',e);return NextResponse.json({error:'Impossible d’analyser ce document.'},{status:500})}}
-const confidence={type:'number',minimum:0,maximum:1};const field=(valueType='string')=>({type:'object',additionalProperties:false,required:['value','confidence'],properties:{value:{type:[valueType,'null']},confidence}});const vatLine={type:'object',additionalProperties:false,required:['rate','ht','vat','ttc','confidence'],properties:{rate:{type:['number','null']},ht:{type:['number','null']},vat:{type:['number','null']},ttc:{type:['number','null']},confidence}};
-const invoiceSchema={type:'object',additionalProperties:false,required:['restaurant','supplier','category','date','number','ht','vat','ttc','dueDate','vatLines'],properties:{restaurant:field(),supplier:field(),category:field(),date:field(),number:field(),ht:field('number'),vat:field('number'),ttc:field('number'),dueDate:field(),vatLines:{type:'array',items:vatLine}}};
-const zSchema={type:'object',additionalProperties:false,required:['restaurant','date','ca','covers','lunch','dinner','vatLines'],properties:{restaurant:field(),date:field(),ca:field('number'),covers:field('number'),lunch:field('number'),dinner:field('number'),vatLines:{type:'array',items:vatLine}}};
-const invoicePrompt=`Lis cette facture fournisseur. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(', ')}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`;
-const zPrompt=`Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`;
-function val(x){return x&&x.value!=null?String(x.value):''}function num(x){return x&&typeof x.value==='number'&&Number.isFinite(x.value)?String(Math.round(x.value*100)/100):''}function conf(x){return x&&Number.isFinite(x.confidence)?Math.max(0,Math.min(1,x.confidence)):0}function lines(a){return Array.isArray(a)?a.filter(x=>x&&Number.isFinite(x.rate)&&Number.isFinite(x.ht)&&Number.isFinite(x.vat)).map(x=>({vat_rate:String(x.rate),amount_ht:String(Math.round(x.ht*100)/100),vat_amount:String(Math.round(x.vat*100)/100),amount_ttc:Number.isFinite(x.ttc)?String(Math.round(x.ttc*100)/100):String(Math.round((x.ht+x.vat)*100)/100),confidence:conf(x)})):[]}
-function normalize(p,type){if(type==='z')return{restaurant:val(p.restaurant),date:val(p.date),ca:num(p.ca),covers:num(p.covers),lunch:num(p.lunch),dinner:num(p.dinner),vatLines:lines(p.vatLines),confidence:{restaurant:conf(p.restaurant),date:conf(p.date),ca:conf(p.ca),covers:conf(p.covers),lunch:conf(p.lunch),dinner:conf(p.dinner)}};const category=CATEGORIES.includes(val(p.category))?val(p.category):'';return{restaurant:val(p.restaurant),supplier:val(p.supplier),category,date:val(p.date),number:val(p.number),ht:num(p.ht),vat:num(p.vat),ttc:num(p.ttc),dueDate:val(p.dueDate),vatLines:lines(p.vatLines),confidence:{restaurant:conf(p.restaurant),supplier:conf(p.supplier),category:category?conf(p.category):0,date:conf(p.date),number:conf(p.number),ht:conf(p.ht),vat:conf(p.vat),ttc:conf(p.ttc),dueDate:conf(p.dueDate)}}}
+import { NextResponse } from "next/server"
+
+export const runtime = "nodejs"
+export const maxDuration = 60
+
+const MODEL = "openai/gpt-5.6-sol"
+
+const CATEGORIES = [
+  "Alimentaire",
+  "Boissons",
+  "Consommable",
+  "Entretien",
+  "Mobilier",
+  "Energie",
+  "Assurance",
+  "Telephonie",
+]
+
+export async function POST(req) {
+  try {
+    const key = process.env.AI_GATEWAY_API_KEY
+
+    if (!key) {
+      return NextResponse.json(
+        { error: "AI Gateway non configuré." },
+        { status: 503 }
+      )
+    }
+
+    const form = await req.formData()
+    const file = form.get("file")
+    const type = form.get("type") === "z" ? "z" : "invoice"
+
+    if (!file || typeof file.arrayBuffer !== "function") {
+      return NextResponse.json(
+        { error: "Document manquant." },
+        { status: 400 }
+      )
+    }
+
+    const mediaType = String(file.type || "").toLowerCase()
+    const isImage = mediaType.startsWith("image/")
+    const isPdf =
+      mediaType === "application/pdf" ||
+      String(file.name || "").toLowerCase().endsWith(".pdf")
+
+    if (!isImage && !isPdf) {
+      return NextResponse.json(
+        { error: "Utilisez une image ou un fichier PDF." },
+        { status: 400 }
+      )
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      return NextResponse.json(
+        { error: "Document trop volumineux (10 Mo maximum)." },
+        { status: 400 }
+      )
+    }
+
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64")
+    const schema = type === "invoice" ? invoiceSchema : zSchema
+    const instructions = type === "invoice" ? invoicePrompt : zPrompt
+
+    const documentInput = isPdf
+      ? {
+          type: "input_file",
+          filename: file.name || "document.pdf",
+          file_data: `data:application/pdf;base64,${b64}`,
+        }
+      : {
+          type: "input_image",
+          image_url: `data:${mediaType};base64,${b64}`,
+        }
+
+    const body = {
+      model: MODEL,
+      input: [
+        {
+          role: "system",
+          content: [
+            {
+              type: "input_text",
+              text: "Tu analyses des documents comptables français pour Maison Oddos. Lis uniquement ce qui est visible. N’invente jamais une valeur, un taux ou une ventilation TVA absente ou ambiguë.",
+            },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "input_text",
+              text: instructions,
+            },
+            documentInput,
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: type === "invoice" ? "supplier_invoice" : "z_report",
+          strict: true,
+          schema,
+        },
+      },
+    }
+
+    const response = await fetch(
+      "https://ai-gateway.vercel.sh/v1/responses",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      }
+    )
+
+    const responseText = await response.text()
+
+    if (!response.ok) {
+      console.error("AI Gateway", response.status, responseText)
+
+      return NextResponse.json(
+        {
+          error: "La lecture IA est momentanément indisponible.",
+          details: responseText.slice(0, 1000),
+        },
+        { status: 502 }
+      )
+    }
+
+    const data = JSON.parse(responseText)
+
+    const content =
+      data.output_text ||
+      data.output
+        ?.flatMap((item) => item.content || [])
+        ?.find((item) => item.type === "output_text")
+        ?.text
+
+    if (!content) {
+      return NextResponse.json(
+        { error: "L’IA n’a pas retourné de lecture exploitable." },
+        { status: 502 }
+      )
+    }
+
+    const parsed =
+      typeof content === "string" ? JSON.parse(content) : content
+
+    return NextResponse.json({
+      ok: true,
+      result: normalize(parsed, type),
+      model: MODEL,
+    })
+  } catch (error) {
+    console.error("scan-ai", error)
+
+    return NextResponse.json(
+      {
+        error: "Impossible d’analyser ce document.",
+        details: String(error?.message || error),
+      },
+      { status: 500 }
+    )
+  }
+}
+
+const confidence = {
+  type: "number",
+  minimum: 0,
+  maximum: 1,
+}
+
+const field = (valueType = "string") => ({
+  type: "object",
+  additionalProperties: false,
+  required: ["value", "confidence"],
+  properties: {
+    value: { type: [valueType, "null"] },
+    confidence,
+  },
+})
+
+const vatLine = {
+  type: "object",
+  additionalProperties: false,
+  required: ["rate", "ht", "vat", "ttc", "confidence"],
+  properties: {
+    rate: { type: ["number", "null"] },
+    ht: { type: ["number", "null"] },
+    vat: { type: ["number", "null"] },
+    ttc: { type: ["number", "null"] },
+    confidence,
+  },
+}
+
+const invoiceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "restaurant",
+    "supplier",
+    "category",
+    "date",
+    "number",
+    "ht",
+    "vat",
+    "ttc",
+    "dueDate",
+    "vatLines",
+  ],
+  properties: {
+    restaurant: field(),
+    supplier: field(),
+    category: field(),
+    date: field(),
+    number: field(),
+    ht: field("number"),
+    vat: field("number"),
+    ttc: field("number"),
+    dueDate: field(),
+    vatLines: {
+      type: "array",
+      items: vatLine,
+    },
+  },
+}
+
+const zSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "restaurant",
+    "date",
+    "ca",
+    "covers",
+    "lunch",
+    "dinner",
+    "vatLines",
+  ],
+  properties: {
+    restaurant: field(),
+    date: field(),
+    ca: field("number"),
+    covers: field("number"),
+    lunch: field("number"),
+    dinner: field("number"),
+    vatLines: {
+      type: "array",
+      items: vatLine,
+    },
+  },
+}
+
+const invoicePrompt = `Lis cette facture fournisseur. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(", ")}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`
+
+const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`
+
+function val(x) {
+  return x && x.value != null ? String(x.value) : ""
+}
+
+function num(x) {
+  return x &&
+    typeof x.value === "number" &&
+    Number.isFinite(x.value)
+    ? String(Math.round(x.value * 100) / 100)
+    : ""
+}
+
+function conf(x) {
+  return x && Number.isFinite(x.confidence)
+    ? Math.max(0, Math.min(1, x.confidence))
+    : 0
+}
+
+function lines(a) {
+  return Array.isArray(a)
+    ? a
+        .filter(
+          (x) =>
+            x &&
+            Number.isFinite(x.rate) &&
+            Number.isFinite(x.ht) &&
+            Number.isFinite(x.vat)
+        )
+        .map((x) => ({
+          vat_rate: String(x.rate),
+          amount_ht: String(Math.round(x.ht * 100) / 100),
+          vat_amount: String(Math.round(x.vat * 100) / 100),
+          amount_ttc: Number.isFinite(x.ttc)
+            ? String(Math.round(x.ttc * 100) / 100)
+            : String(Math.round((x.ht + x.vat) * 100) / 100),
+          confidence: conf(x),
+        }))
+    : []
+}
+
+function normalize(p, type) {
+  if (type === "z") {
+    return {
+      restaurant: val(p.restaurant),
+      date: val(p.date),
+      ca: num(p.ca),
+      covers: num(p.covers),
+      lunch: num(p.lunch),
+      dinner: num(p.dinner),
+      vatLines: lines(p.vatLines),
+      confidence: {
+        restaurant: conf(p.restaurant),
+        date: conf(p.date),
+        ca: conf(p.ca),
+        covers: conf(p.covers),
+        lunch: conf(p.lunch),
+        dinner: conf(p.dinner),
+      },
+    }
+  }
+
+  const category = CATEGORIES.includes(val(p.category))
+    ? val(p.category)
+    : ""
+
+  return {
+    restaurant: val(p.restaurant),
+    supplier: val(p.supplier),
+    category,
+    date: val(p.date),
+    number: val(p.number),
+    ht: num(p.ht),
+    vat: num(p.vat),
+    ttc: num(p.ttc),
+    dueDate: val(p.dueDate),
+    vatLines: lines(p.vatLines),
+    confidence: {
+      restaurant: conf(p.restaurant),
+      supplier: conf(p.supplier),
+      category: category ? conf(p.category) : 0,
+      date: conf(p.date),
+      number: conf(p.number),
+      ht: conf(p.ht),
+      vat: conf(p.vat),
+      ttc: conf(p.ttc),
+      dueDate: conf(p.dueDate),
+    },
+  }
+}
