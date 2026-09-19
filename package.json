@@ -12,9 +12,7 @@
     "next": "16.0.10",
     "react": "19.2.0",
     "react-dom": "19.2.0",
-    "tesseract.js": "7.0.0",
-    "imapflow": "1.0.195",
-    "mailparser": "3.7.4"
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {}
 }
