@@ -6,6 +6,10 @@ const sb=createClient('https://ldwgsogeqreywbqulqyj.supabase.co','sb_publishable
 const money=n=>new Intl.NumberFormat('fr-FR',{style:'currency',currency:'EUR'}).format(Number(n||0))
 const VILLA='8395bf22-99cb-4a7b-9096-ca734d583d83'
 const PARC='55c6e880-aa0c-40d6-9065-b5315b1a602a'
+const ESTABLISHMENT_NAMES={
+ [VILLA]:'Villa Valleyre',
+ [PARC]:'La Maison du Parc'
+}
 const isOpen=(est,date)=>{const d=date.getDay();if(est===VILLA)return d>=2&&d<=6;if(est===PARC)return d>=1&&d<=6;return d>=1&&d<=6}
 const openDaysInMonth=(est,ym)=>{const [y,m]=ym.split('-').map(Number),days=new Date(y,m,0).getDate();let n=0;for(let i=1;i<=days;i++)if(isOpen(est,new Date(y,m-1,i)))n++;return n||1}
 
@@ -78,7 +82,16 @@ export default function TTCDisplayEnhancer(){
     const lastTable=lastHeading?.nextElementSibling
     if(lastTable?.tagName==='TABLE'||lastTable?.querySelector?.('table')){
      const table=lastTable.tagName==='TABLE'?lastTable:lastTable.querySelector('table')
-     ;[...table.querySelectorAll('tbody tr')].forEach((tr,i)=>{const cells=tr.querySelectorAll('td');const sale=filtered[i];if(cells[2]&&sale)cells[2].textContent=money(sale.ttc)})
+     const saleByRow=new Map(filtered.map(s=>[
+      `${String(s.business_date).slice(0,10)}|${ESTABLISHMENT_NAMES[s.establishment_id]||s.establishment_id}`,
+      s
+     ]))
+     ;[...table.querySelectorAll('tbody tr')].forEach(tr=>{
+      const cells=tr.querySelectorAll('td')
+      const rowKey=`${cells[0]?.textContent?.trim()||''}|${cells[1]?.textContent?.trim()||''}`
+      const sale=saleByRow.get(rowKey)
+      if(cells[2]&&sale)cells[2].textContent=money(sale.ttc)
+     })
     }
     ;[...main.querySelectorAll('small')].forEach(s=>{if(s.textContent?.startsWith('Charges = achats + personnel'))s.textContent='Graphique de gestion conservé en HT : achats + personnel + charges fixes. L’écart représente CA HT − charges.'})
    }
