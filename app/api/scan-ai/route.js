@@ -1,9 +1,9 @@
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 
-export const runtime = "nodejs"
-export const maxDuration = 60
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
-const MODEL = "openai/gpt-5.6-sol"
+const MODEL = "openai/gpt-5.6-sol";
 
 const CATEGORIES = [
   "Alimentaire",
@@ -14,53 +14,57 @@ const CATEGORIES = [
   "Energie",
   "Assurance",
   "Telephonie",
-]
+  "TPE",
+  "Logiciel caisse",
+];
 
 export async function POST(req) {
   try {
-    const key = process.env.AI_GATEWAY_API_KEY
+    const key = process.env.AI_GATEWAY_API_KEY;
 
     if (!key) {
       return NextResponse.json(
         { error: "AI Gateway non configuré." },
-        { status: 503 }
-      )
+        { status: 503 },
+      );
     }
 
-    const form = await req.formData()
-    const file = form.get("file")
-    const type = form.get("type") === "z" ? "z" : "invoice"
+    const form = await req.formData();
+    const file = form.get("file");
+    const type = form.get("type") === "z" ? "z" : "invoice";
 
     if (!file || typeof file.arrayBuffer !== "function") {
       return NextResponse.json(
         { error: "Document manquant." },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
 
-    const mediaType = String(file.type || "").toLowerCase()
-    const isImage = mediaType.startsWith("image/")
+    const mediaType = String(file.type || "").toLowerCase();
+    const isImage = mediaType.startsWith("image/");
     const isPdf =
       mediaType === "application/pdf" ||
-      String(file.name || "").toLowerCase().endsWith(".pdf")
+      String(file.name || "")
+        .toLowerCase()
+        .endsWith(".pdf");
 
     if (!isImage && !isPdf) {
       return NextResponse.json(
         { error: "Utilisez une image ou un fichier PDF." },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
 
     if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
         { error: "Document trop volumineux (10 Mo maximum)." },
-        { status: 400 }
-      )
+        { status: 400 },
+      );
     }
 
-    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64")
-    const schema = type === "invoice" ? invoiceSchema : zSchema
-    const instructions = type === "invoice" ? invoicePrompt : zPrompt
+    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const schema = type === "invoice" ? invoiceSchema : zSchema;
+    const instructions = type === "invoice" ? invoicePrompt : zPrompt;
 
     const documentInput = isPdf
       ? {
@@ -71,7 +75,7 @@ export async function POST(req) {
       : {
           type: "input_image",
           image_url: `data:${mediaType};base64,${b64}`,
-        }
+        };
 
     const body = {
       model: MODEL,
@@ -104,68 +108,63 @@ export async function POST(req) {
           schema,
         },
       },
-    }
+    };
 
-    const response = await fetch(
-      "https://ai-gateway.vercel.sh/v1/responses",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${key}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      }
-    )
+    const response = await fetch("https://ai-gateway.vercel.sh/v1/responses", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
 
-    const responseText = await response.text()
+    const responseText = await response.text();
 
     if (!response.ok) {
-      console.error("AI Gateway", response.status, responseText)
+      console.error("AI Gateway", response.status, responseText);
 
       return NextResponse.json(
         {
           error: "La lecture IA est momentanément indisponible.",
           details: responseText.slice(0, 1000),
         },
-        { status: 502 }
-      )
+        { status: 502 },
+      );
     }
 
-    const data = JSON.parse(responseText)
+    const data = JSON.parse(responseText);
 
     const content =
       data.output_text ||
       data.output
         ?.flatMap((item) => item.content || [])
-        ?.find((item) => item.type === "output_text")
-        ?.text
+        ?.find((item) => item.type === "output_text")?.text;
 
     if (!content) {
       return NextResponse.json(
         { error: "L’IA n’a pas retourné de lecture exploitable." },
-        { status: 502 }
-      )
+        { status: 502 },
+      );
     }
 
-    const parsed =
-      typeof content === "string" ? JSON.parse(content) : content
+    const parsed = typeof content === "string" ? JSON.parse(content) : content;
 
     return NextResponse.json({
       ok: true,
       result: normalize(parsed, type),
       model: MODEL,
-    })
+    });
   } catch (error) {
-    console.error("scan-ai", error)
+    console.error("scan-ai", error);
 
     return NextResponse.json(
       {
         error: "Impossible d’analyser ce document.",
         details: String(error?.message || error),
       },
-      { status: 500 }
-    )
+      { status: 500 },
+    );
   }
 }
 
@@ -173,7 +172,7 @@ const confidence = {
   type: "number",
   minimum: 0,
   maximum: 1,
-}
+};
 
 const field = (valueType = "string") => ({
   type: "object",
@@ -183,7 +182,7 @@ const field = (valueType = "string") => ({
     value: { type: [valueType, "null"] },
     confidence,
   },
-})
+});
 
 const vatLine = {
   type: "object",
@@ -196,13 +195,14 @@ const vatLine = {
     ttc: { type: ["number", "null"] },
     confidence,
   },
-}
+};
 
 const invoiceSchema = {
   type: "object",
   additionalProperties: false,
   required: [
     "restaurant",
+    "documentType",
     "supplier",
     "category",
     "date",
@@ -215,6 +215,7 @@ const invoiceSchema = {
   ],
   properties: {
     restaurant: field(),
+    documentType: field(),
     supplier: field(),
     category: field(),
     date: field(),
@@ -228,7 +229,7 @@ const invoiceSchema = {
       items: vatLine,
     },
   },
-}
+};
 
 const zSchema = {
   type: "object",
@@ -254,28 +255,26 @@ const zSchema = {
       items: vatLine,
     },
   },
-}
+};
 
-const invoicePrompt = `Lis cette facture fournisseur. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(", ")}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`
+const invoicePrompt = `Lis ce document fournisseur. Retourne uniquement le JSON demandé. documentType vaut exactement "invoice" pour une facture ou "credit_note" pour un avoir, uniquement d'après une mention explicite du document. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(", ")}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux en valeur positive, y compris pour un avoir. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA, toujours en valeur positive. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`;
 
-const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`
+const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`;
 
 function val(x) {
-  return x && x.value != null ? String(x.value) : ""
+  return x && x.value != null ? String(x.value) : "";
 }
 
 function num(x) {
-  return x &&
-    typeof x.value === "number" &&
-    Number.isFinite(x.value)
+  return x && typeof x.value === "number" && Number.isFinite(x.value)
     ? String(Math.round(x.value * 100) / 100)
-    : ""
+    : "";
 }
 
 function conf(x) {
   return x && Number.isFinite(x.confidence)
     ? Math.max(0, Math.min(1, x.confidence))
-    : 0
+    : 0;
 }
 
 function lines(a) {
@@ -286,7 +285,7 @@ function lines(a) {
             x &&
             Number.isFinite(x.rate) &&
             Number.isFinite(x.ht) &&
-            Number.isFinite(x.vat)
+            Number.isFinite(x.vat),
         )
         .map((x) => ({
           vat_rate: String(x.rate),
@@ -297,7 +296,7 @@ function lines(a) {
             : String(Math.round((x.ht + x.vat) * 100) / 100),
           confidence: conf(x),
         }))
-    : []
+    : [];
 }
 
 function normalize(p, type) {
@@ -318,15 +317,17 @@ function normalize(p, type) {
         lunch: conf(p.lunch),
         dinner: conf(p.dinner),
       },
-    }
+    };
   }
 
-  const category = CATEGORIES.includes(val(p.category))
-    ? val(p.category)
-    : ""
+  const category = CATEGORIES.includes(val(p.category)) ? val(p.category) : "";
+  const documentType = ["invoice", "credit_note"].includes(val(p.documentType))
+    ? val(p.documentType)
+    : "";
 
   return {
     restaurant: val(p.restaurant),
+    documentType,
     supplier: val(p.supplier),
     category,
     date: val(p.date),
@@ -338,6 +339,7 @@ function normalize(p, type) {
     vatLines: lines(p.vatLines),
     confidence: {
       restaurant: conf(p.restaurant),
+      documentType: documentType ? conf(p.documentType) : 0,
       supplier: conf(p.supplier),
       category: category ? conf(p.category) : 0,
       date: conf(p.date),
@@ -347,5 +349,5 @@ function normalize(p, type) {
       ttc: conf(p.ttc),
       dueDate: conf(p.dueDate),
     },
-  }
+  };
 }

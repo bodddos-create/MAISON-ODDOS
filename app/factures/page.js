@@ -14,6 +14,8 @@ const cats = [
   "Energie",
   "Assurance",
   "Telephonie",
+  "TPE",
+  "Logiciel caisse",
 ];
 const euro = (n) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(
@@ -30,6 +32,7 @@ export default function Factures() {
   const [user, setUser] = useState(undefined),
     [ests, setEsts] = useState([]),
     [rows, setRows] = useState([]),
+    [imports, setImports] = useState([]),
     [edit, setEdit] = useState(null),
     [msg, setMsg] = useState(""),
     [busy, setBusy] = useState(false);
@@ -40,16 +43,23 @@ export default function Factures() {
     if (user) load();
   }, [user]);
   async function load() {
-    const [{ data: e }, { data: i }] = await Promise.all([
+    const [{ data: e }, { data: i }, { data: pending }] = await Promise.all([
       sb.from("establishments").select("id,name").eq("active", true),
       sb
         .from("supplier_invoices")
         .select("*")
         .order("invoice_date", { ascending: false })
         .limit(1000),
+      sb
+        .from("invoice_imports")
+        .select("id,filename,sender,subject,status,reason,analysis,created_at")
+        .in("status", ["review", "error"])
+        .order("created_at", { ascending: false })
+        .limit(100),
     ]);
     setEsts(e || []);
     setRows(i || []);
+    setImports(pending || []);
   }
   const name = (id) => ests.find((x) => x.id === id)?.name || "—";
   function open(x) {
@@ -292,6 +302,68 @@ export default function Factures() {
             <b>{msg}</b>
           </p>
         )}
+        <h2>Documents reçus à vérifier</h2>
+        <p>
+          Les factures et avoirs incertains restent ici sans modifier les
+          chiffres.
+        </p>
+        <div className="table" style={{ marginBottom: 28 }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Reçu le</th>
+                <th>Fichier</th>
+                <th>Expéditeur</th>
+                <th>Lecture</th>
+                <th>Raison</th>
+              </tr>
+            </thead>
+            <tbody>
+              {imports.length ? (
+                imports.map((item) => {
+                  const result = item.analysis?.result || {};
+
+                  return (
+                    <tr key={item.id}>
+                      <td>
+                        {new Date(item.created_at).toLocaleString("fr-FR")}
+                      </td>
+                      <td>
+                        <b>{item.filename}</b>
+                        {item.subject ? <div>{item.subject}</div> : null}
+                      </td>
+                      <td>{item.sender || "—"}</td>
+                      <td>
+                        {result.supplier || "Document non lu"}
+                        {result.date ? <div>{result.date}</div> : null}
+                        {result.ttc ? (
+                          <div>
+                            {result.documentType === "credit_note"
+                              ? "Avoir · "
+                              : "Facture · "}
+                            {euro(result.ttc)} TTC
+                          </div>
+                        ) : null}
+                      </td>
+                      <td>
+                        <b>
+                          {item.status === "error"
+                            ? "Erreur de lecture"
+                            : "À contrôler"}
+                        </b>
+                        <div>{item.reason || "Vérification nécessaire"}</div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="5">Aucun document en attente.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
         <h2>Factures et avoirs fournisseurs</h2>
         <div className="table">
           <table>
