@@ -12,6 +12,25 @@ const timeToMinutes = (value) => {
   return hours * 60 + minutes;
 };
 const timeLabel = (value) => String(value).slice(0, 5).replace(":", "h");
+const nextAvailableDate = (services, establishmentId) => {
+  const start = new Date(`${today()}T12:00:00`);
+  for (let offset = 0; offset < 14; offset += 1) {
+    const candidate = new Date(start);
+    candidate.setDate(start.getDate() + offset);
+    if (
+      services.some(
+        (service) =>
+          service.establishment_id === establishmentId &&
+          Number(service.weekday) === candidate.getDay(),
+      )
+    ) {
+      const local = new Date(candidate);
+      local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+      return local.toISOString().slice(0, 10);
+    }
+  }
+  return today();
+};
 
 export default function ReservationPage() {
   const [data, setData] = useState({ establishments: [], services: [] });
@@ -37,9 +56,14 @@ export default function ReservationPage() {
         const body = await response.json();
         if (!response.ok) throw new Error(body.error);
         setData(body);
+        const firstEstablishment = body.establishments?.[0]?.id || "";
         setForm((current) => ({
           ...current,
-          establishment_id: current.establishment_id || body.establishments?.[0]?.id || "",
+          establishment_id: current.establishment_id || firstEstablishment,
+          reservation_date: nextAvailableDate(
+            body.services || [],
+            current.establishment_id || firstEstablishment,
+          ),
         }));
       })
       .catch((loadError) => setError(loadError.message))
