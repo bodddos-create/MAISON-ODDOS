@@ -758,11 +758,16 @@ export default function Home() {
           ["stocks", "Stocks"],
           ["charges", "Charges"],
           ["historique", "Historique"],
+          ["evolution-ca", "Évolution du CA"],
         ].map(([k, l]) => (
           <button
             key={k}
             className={tab === k ? "active" : ""}
             onClick={() => {
+              if (k === "evolution-ca") {
+                window.location.href = "/evolution-ca";
+                return;
+              }
               setTab(k);
               setSaveMsg("");
             }}
