@@ -287,11 +287,7 @@ export default function EvolutionCA() {
         historical: true,
       }));
     const monthlyHistory = historyRows
-      .filter(
-        (row) =>
-          row.period_type === "month" &&
-          Number(String(row.period_start).slice(0, 4)) < currentYear,
-      )
+      .filter((row) => row.period_type === "month")
       .map((row) => ({
         id: `history-${row.id}`,
         establishment_id: row.establishment_id,
