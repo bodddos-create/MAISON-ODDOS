@@ -298,6 +298,7 @@ const zHistorySchema = {
     "periodStart",
     "periodEnd",
     "reportTotalTtc",
+    "reportCovers",
     "periods",
   ],
   properties: {
@@ -306,6 +307,7 @@ const zHistorySchema = {
     periodStart: field(),
     periodEnd: field(),
     reportTotalTtc: field("number"),
+    reportCovers: field("number"),
     periods: { type: "array", items: historyPeriod },
   },
 };
@@ -314,7 +316,7 @@ const invoicePrompt = `Lis ce document fournisseur. Retourne uniquement le JSON 
 
 const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`;
 
-const zHistoryPrompt = `Lis ce récapitulatif historique de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. year est l'année couverte. periodStart et periodEnd sont les dates de début et de fin du rapport au format YYYY-MM-DD. reportTotalTtc est le CA/total TTC global explicitement imprimé pour toute la période du rapport, qu'il couvre un jour, un mois ou une année. periods contient chaque autre total TTC explicitement imprimé par jour ou par mois : granularity vaut "day" avec date YYYY-MM-DD, ou "month" avec date YYYY-MM-01. covers est le nombre de couverts de la même période uniquement s'il est indiqué. Ne calcule pas une période en additionnant des lignes, ne transforme pas un cumul en période et n'invente aucune valeur.`;
+const zHistoryPrompt = `Lis ce récapitulatif historique de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. year est l'année couverte. periodStart et periodEnd sont les dates de début et de fin du rapport au format YYYY-MM-DD. reportTotalTtc est le CA/total TTC global explicitement imprimé pour toute la période du rapport, qu'il couvre un jour, un mois ou une année. reportCovers est le nombre total de couverts explicitement imprimé pour toute la période du rapport. periods contient chaque autre total TTC explicitement imprimé par jour ou par mois : granularity vaut "day" avec date YYYY-MM-DD, ou "month" avec date YYYY-MM-01. covers est le nombre de couverts de la même période uniquement s'il est indiqué. Ne calcule pas une période en additionnant des lignes, ne transforme pas un cumul en période et n'invente aucune valeur.`;
 
 function val(x) {
   return x && x.value != null ? String(x.value) : "";
@@ -363,6 +365,7 @@ function normalize(p, type) {
       periodStart: val(p.periodStart),
       periodEnd: val(p.periodEnd),
       reportTotalTtc: num(p.reportTotalTtc),
+      reportCovers: num(p.reportCovers),
       periods: Array.isArray(p.periods)
         ? p.periods
             .filter(
@@ -388,6 +391,7 @@ function normalize(p, type) {
         periodStart: conf(p.periodStart),
         periodEnd: conf(p.periodEnd),
         reportTotalTtc: conf(p.reportTotalTtc),
+        reportCovers: conf(p.reportCovers),
       },
     };
   }

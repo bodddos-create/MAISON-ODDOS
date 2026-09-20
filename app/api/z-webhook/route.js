@@ -413,7 +413,9 @@ async function saveHistoricalZ({
       period_start: reportPeriodStart,
       period_type: reportPeriodType,
       amount_ttc: reportTotalTtc,
-      covers: null,
+      covers: toNumber(result?.reportCovers) > 0
+        ? Math.round(toNumber(result.reportCovers))
+        : null,
       confidence: Number(result?.confidence?.reportTotalTtc) || null,
       source_document_path: documentPath,
       source_filename: filename,
