@@ -97,38 +97,40 @@ export default function Factures() {
       setBusy(false);
     }
   }
-  async function shareDocument(item) {
+  async function shareDocument(item, source) {
+    const recipient = window.prompt("Adresse e-mail du destinataire :");
+    if (!recipient) return;
+
     setMsg("");
     setBusy(true);
     try {
-      const url = await documentUrl(item);
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Téléchargement du PDF impossible.");
-      const blob = await response.blob();
-      const filename = item.filename || item.document_path.split("/").pop();
-      const file = new File([blob], filename, {
-        type: blob.type || "application/pdf",
-      });
+      const {
+        data: { session },
+      } = await sb.auth.getSession();
+      if (!session?.access_token) throw new Error("Session expirée.");
 
-      if (navigator.share && navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          title: `Document Maison Oddos — ${filename}`,
-          text: "Document comptable Maison Oddos",
-          files: [file],
-        });
-        setMsg("✓ Document partagé.");
-      } else {
-        const subject = encodeURIComponent(
-          `Document Maison Oddos — ${filename}`,
-        );
-        const body = encodeURIComponent(
-          `Bonjour,\n\nVoici le document Maison Oddos :\n${url}\n\nCe lien sécurisé reste valable pendant 1 heure.`,
-        );
-        window.location.href = `mailto:?subject=${subject}&body=${body}`;
-        setMsg("✓ Votre messagerie va s’ouvrir avec un lien sécurisé.");
+      const response = await fetch("/api/invoice-share", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          to: recipient,
+          ...(source === "import"
+            ? { importId: item.id }
+            : { invoiceId: item.id }),
+        }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Envoi impossible.");
       }
+
+      setMsg(`✓ PDF envoyé à ${recipient}.`);
     } catch (error) {
-      if (error?.name !== "AbortError") setMsg("Erreur : " + error.message);
+      setMsg("Erreur : " + error.message);
     } finally {
       setBusy(false);
     }
@@ -441,10 +443,10 @@ export default function Factures() {
                               Voir le PDF
                             </button>
                             <button
-                              onClick={() => shareDocument(item)}
+                              onClick={() => shareDocument(item, "import")}
                               disabled={busy}
                             >
-                              Partager / envoyer
+                              Envoyer par e-mail
                             </button>
                           </div>
                         ) : (
@@ -520,10 +522,10 @@ export default function Factures() {
                               Voir le PDF
                             </button>
                             <button
-                              onClick={() => shareDocument(x)}
+                              onClick={() => shareDocument(x, "invoice")}
                               disabled={busy}
                             >
-                              Partager / envoyer
+                              Envoyer par e-mail
                             </button>
                           </>
                         )}
