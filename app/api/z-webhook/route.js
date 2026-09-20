@@ -2,7 +2,7 @@ import { processInvoiceEmail } from "./invoice";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const clean = (value) =>
   String(value || "")
@@ -378,15 +378,43 @@ async function saveHistoricalZ({
   }
 
   const rows = [];
-  const totalTtc = roundMoney(toNumber(result?.totalTtc));
-  if (totalTtc > 0) {
+  const periodStart = String(result?.periodStart || "");
+  const periodEnd = String(result?.periodEnd || "");
+  const reportTotalTtc = roundMoney(toNumber(result?.reportTotalTtc));
+  const datesAreValid =
+    /^\d{4}-\d{2}-\d{2}$/.test(periodStart) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(periodEnd) &&
+    periodStart.startsWith(`${year}-`) &&
+    periodEnd.startsWith(`${year}-`);
+  let reportPeriodType = "";
+  let reportPeriodStart = "";
+
+  if (datesAreValid && periodStart === periodEnd) {
+    reportPeriodType = "day";
+    reportPeriodStart = periodStart;
+  } else if (
+    datesAreValid &&
+    periodStart.slice(0, 7) === periodEnd.slice(0, 7)
+  ) {
+    reportPeriodType = "month";
+    reportPeriodStart = `${periodStart.slice(0, 7)}-01`;
+  } else if (
+    datesAreValid &&
+    periodStart === `${year}-01-01` &&
+    periodEnd === `${year}-12-31`
+  ) {
+    reportPeriodType = "year";
+    reportPeriodStart = `${year}-01-01`;
+  }
+
+  if (reportTotalTtc > 0 && reportPeriodType) {
     rows.push({
       establishment_id: resolvedRestaurant.establishment_id,
-      period_start: `${year}-01-01`,
-      period_type: "year",
-      amount_ttc: totalTtc,
+      period_start: reportPeriodStart,
+      period_type: reportPeriodType,
+      amount_ttc: reportTotalTtc,
       covers: null,
-      confidence: Number(result?.confidence?.totalTtc) || null,
+      confidence: Number(result?.confidence?.reportTotalTtc) || null,
       source_document_path: documentPath,
       source_filename: filename,
       source_email_id: emailId,
@@ -452,7 +480,8 @@ async function saveHistoricalZ({
     historical: true,
     needs_review: false,
     year,
-    annual_total_ttc: totalTtc || null,
+    report_period_type: reportPeriodType || null,
+    report_total_ttc: reportTotalTtc || null,
     periods_saved: savedRows?.filter((row) => row.period_type !== "year").length || 0,
     document_path: documentPath,
   };
