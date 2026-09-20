@@ -336,7 +336,9 @@ export async function POST(request) {
       .filter(Boolean)
       .join(" ");
 
-    if (/\bfactures?@reception\.oddos\.eu\b/i.test(recipients)) {
+    if (
+      /\bfactures?(?:-villa|-parc)?@reception\.oddos\.eu\b/i.test(recipients)
+    ) {
       return processInvoiceEmail({
         email,
         eventData,

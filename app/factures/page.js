@@ -52,7 +52,9 @@ export default function Factures() {
         .limit(1000),
       sb
         .from("invoice_imports")
-        .select("id,filename,sender,subject,status,reason,analysis,created_at")
+        .select(
+          "id,filename,sender,subject,status,reason,analysis,document_path,created_at",
+        )
         .in("status", ["review", "error"])
         .order("created_at", { ascending: false })
         .limit(100),
@@ -62,6 +64,75 @@ export default function Factures() {
     setImports(pending || []);
   }
   const name = (id) => ests.find((x) => x.id === id)?.name || "—";
+  const archived = (item) =>
+    String(item?.document_path || "").startsWith("invoices/");
+  async function documentUrl(item) {
+    if (!archived(item)) {
+      throw new Error("Le PDF original n’est pas encore archivé.");
+    }
+
+    const { data, error } = await sb.storage
+      .from("accounting-documents")
+      .createSignedUrl(item.document_path, 3600);
+
+    if (error || !data?.signedUrl) {
+      throw new Error(error?.message || "Lien du document indisponible.");
+    }
+
+    return data.signedUrl;
+  }
+  async function viewDocument(item) {
+    setMsg("");
+    setBusy(true);
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    try {
+      const url = await documentUrl(item);
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+    } catch (error) {
+      tab?.close();
+      setMsg("Erreur : " + error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function shareDocument(item) {
+    setMsg("");
+    setBusy(true);
+    try {
+      const url = await documentUrl(item);
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Téléchargement du PDF impossible.");
+      const blob = await response.blob();
+      const filename = item.filename || item.document_path.split("/").pop();
+      const file = new File([blob], filename, {
+        type: blob.type || "application/pdf",
+      });
+
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          title: `Document Maison Oddos — ${filename}`,
+          text: "Document comptable Maison Oddos",
+          files: [file],
+        });
+        setMsg("✓ Document partagé.");
+      } else {
+        const subject = encodeURIComponent(
+          `Document Maison Oddos — ${filename}`,
+        );
+        const body = encodeURIComponent(
+          `Bonjour,\n\nVoici le document Maison Oddos :\n${url}\n\nCe lien sécurisé reste valable pendant 1 heure.`,
+        );
+        window.location.href = `mailto:?subject=${subject}&body=${body}`;
+        setMsg("✓ Votre messagerie va s’ouvrir avec un lien sécurisé.");
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") setMsg("Erreur : " + error.message);
+    } finally {
+      setBusy(false);
+    }
+  }
   function open(x) {
     setMsg("");
     setEdit({
@@ -316,6 +387,7 @@ export default function Factures() {
                 <th>Expéditeur</th>
                 <th>Lecture</th>
                 <th>Raison</th>
+                <th>Document</th>
               </tr>
             </thead>
             <tbody>
@@ -353,12 +425,38 @@ export default function Factures() {
                         </b>
                         <div>{item.reason || "Vérification nécessaire"}</div>
                       </td>
+                      <td>
+                        {archived(item) ? (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: 6,
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            <button
+                              onClick={() => viewDocument(item)}
+                              disabled={busy}
+                            >
+                              Voir le PDF
+                            </button>
+                            <button
+                              onClick={() => shareDocument(item)}
+                              disabled={busy}
+                            >
+                              Partager / envoyer
+                            </button>
+                          </div>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
                     </tr>
                   );
                 })
               ) : (
                 <tr>
-                  <td colSpan="5">Aucun document en attente.</td>
+                  <td colSpan="6">Aucun document en attente.</td>
                 </tr>
               )}
             </tbody>
@@ -413,6 +511,22 @@ export default function Factures() {
                         <button onClick={() => open(x)}>
                           Ouvrir / Modifier
                         </button>
+                        {archived(x) && (
+                          <>
+                            <button
+                              onClick={() => viewDocument(x)}
+                              disabled={busy}
+                            >
+                              Voir le PDF
+                            </button>
+                            <button
+                              onClick={() => shareDocument(x)}
+                              disabled={busy}
+                            >
+                              Partager / envoyer
+                            </button>
+                          </>
+                        )}
                         <button onClick={() => remove(x)} disabled={busy}>
                           Supprimer
                         </button>

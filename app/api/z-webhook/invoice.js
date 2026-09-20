@@ -43,6 +43,14 @@ const toNumber = (value) => {
 const roundMoney = (value) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const safePathPart = (value) =>
+  String(value || "document")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "document";
+
 function detectRestaurant(value) {
   const text = clean(value);
 
@@ -149,6 +157,52 @@ async function supabaseRequest(path, options = {}) {
   return body;
 }
 
+async function storeDocument({
+  emailId,
+  attachmentId,
+  filename,
+  mediaType,
+  buffer,
+}) {
+  const supabaseUrl = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
+
+  if (!supabaseUrl || !secretKey) {
+    throw new Error("SUPABASE_URL ou SUPABASE_SECRET_KEY absente");
+  }
+
+  const now = new Date();
+  const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const documentPath = `invoices/${month}/${safePathPart(emailId)}/${safePathPart(attachmentId)}-${safePathPart(filename)}`;
+  const encodedPath = documentPath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const response = await fetch(
+    `${supabaseUrl}/storage/v1/object/accounting-documents/${encodedPath}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: secretKey,
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": mediaType,
+        "x-upsert": "true",
+      },
+      body: buffer,
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(
+      `Archivage du document impossible : ${response.status} ${details}`,
+    );
+  }
+
+  return documentPath;
+}
+
 async function recordImport(data) {
   const rows = await supabaseRequest(
     "invoice_imports?on_conflict=email_id,attachment_id",
@@ -171,7 +225,7 @@ async function findImport(emailId, attachmentId) {
   const params = new URLSearchParams({
     email_id: `eq.${emailId}`,
     attachment_id: `eq.${attachmentId}`,
-    select: "id,status,invoice_id,reason",
+    select: "id,status,invoice_id,reason,document_path",
     limit: "1",
   });
   const rows = await supabaseRequest(`invoice_imports?${params}`);
@@ -214,6 +268,13 @@ async function analyzeAttachment({ emailId, attachment, origin }) {
   const filename =
     attachment.filename || attachment.name || "facture-fournisseur.pdf";
   const mediaType = attachmentMediaType(attachment);
+  const documentPath = await storeDocument({
+    emailId,
+    attachmentId,
+    filename,
+    mediaType,
+    buffer,
+  });
   const formData = new FormData();
 
   formData.append("file", new Blob([buffer], { type: mediaType }), filename);
@@ -234,10 +295,12 @@ async function analyzeAttachment({ emailId, attachment, origin }) {
   }
 
   if (!scanResponse.ok) {
-    throw new Error(`Analyse IA ${scanResponse.status}: ${scanText}`);
+    const error = new Error(`Analyse IA ${scanResponse.status}: ${scanText}`);
+    error.documentPath = documentPath;
+    throw error;
   }
 
-  return { analysis, attachmentId, filename };
+  return { analysis, attachmentId, filename, documentPath };
 }
 
 function invoiceReviewReason({ result, restaurant }) {
@@ -331,7 +394,7 @@ async function findDuplicate({ result, restaurant }) {
     establishment_id: `eq.${restaurant.establishment_id}`,
     supplier: `eq.${String(result.supplier).trim()}`,
     document_type: `eq.${result.documentType}`,
-    select: "id,invoice_number,scan_status",
+    select: "id,invoice_number,scan_status,document_path",
     limit: "1",
   };
   const number = String(result.number || "").trim();
@@ -355,8 +418,10 @@ async function saveInvoice({
   emailId,
   attachmentId,
   filename,
+  documentPath,
   analysis,
   restaurantFromEmail,
+  previous,
 }) {
   const result = analysis?.result;
 
@@ -374,6 +439,7 @@ async function saveInvoice({
     sender: String(email.from || ""),
     subject: String(email.subject || ""),
     analysis,
+    document_path: documentPath,
   };
 
   if (review.reason) {
@@ -396,20 +462,35 @@ async function saveInvoice({
   const duplicate = await findDuplicate({ result, restaurant });
 
   if (duplicate) {
+    if (documentPath && duplicate.document_path !== documentPath) {
+      await supabaseRequest(
+        `supplier_invoices?id=eq.${encodeURIComponent(duplicate.id)}`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ document_path: documentPath }),
+        },
+      );
+    }
+
+    const isStoredInvoice =
+      previous?.status === "saved" && previous.invoice_id === duplicate.id;
+
     await recordImport({
       ...importBase,
-      status: "duplicate",
-      reason: "Document déjà enregistré",
+      status: isStoredInvoice ? "saved" : "duplicate",
+      reason: isStoredInvoice ? null : "Document déjà enregistré",
       invoice_id: duplicate.id,
     });
 
     return {
-      saved: false,
-      duplicate: true,
+      saved: isStoredInvoice,
+      duplicate: !isStoredInvoice,
       needs_review: false,
       invoice_id: duplicate.id,
-      reason: "Document déjà enregistré",
+      reason: isStoredInvoice ? null : "Document déjà enregistré",
       filename,
+      document_path: documentPath,
     };
   }
 
@@ -425,7 +506,7 @@ async function saveInvoice({
       ? result.dueDate
       : null,
     paid: false,
-    document_path: filename,
+    document_path: documentPath,
     scan_status: "analyzed",
     scan_confidence: review.confidence,
     document_type: result.documentType,
@@ -486,6 +567,7 @@ async function saveInvoice({
     total_ttc: roundMoney(toNumber(result.ttc)),
     vat_lines_saved: vatLines.length,
     filename,
+    document_path: documentPath,
   };
 }
 
@@ -506,7 +588,10 @@ async function processAttachment(context) {
 
   const previous = await findImport(emailId, attachmentId);
 
-  if (previous && ["saved", "duplicate"].includes(previous.status)) {
+  if (
+    previous?.document_path &&
+    ["saved", "duplicate"].includes(previous.status)
+  ) {
     return {
       saved: previous.status === "saved",
       duplicate: previous.status === "duplicate",
@@ -514,6 +599,7 @@ async function processAttachment(context) {
       invoice_id: previous.invoice_id,
       reason: previous.reason,
       filename,
+      document_path: previous.document_path,
     };
   }
 
@@ -529,6 +615,7 @@ async function processAttachment(context) {
       emailId,
       ...analyzed,
       restaurantFromEmail,
+      previous,
     });
   } catch (error) {
     await recordImport({
@@ -543,6 +630,7 @@ async function processAttachment(context) {
       status: "error",
       reason: String(error?.message || error).slice(0, 1500),
       analysis: null,
+      document_path: error?.documentPath || previous?.document_path || null,
       invoice_id: null,
     });
     throw error;
@@ -575,16 +663,34 @@ export async function processInvoiceEmail({
     });
   }
 
-  const restaurantFromEmail = detectRestaurant(
-    JSON.stringify({
-      subject: email.subject,
-      text: email.text,
-      html: email.html,
-      from: email.from,
-      to: email.to,
-      received_for: email.received_for,
-    }),
-  );
+  const recipients = [
+    ...(Array.isArray(email.to) ? email.to : [email.to]),
+    ...(Array.isArray(email.received_for)
+      ? email.received_for
+      : [email.received_for]),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const normalizedRecipients = clean(recipients);
+  const restaurantFromRecipient = normalizedRecipients.includes(
+    "factures-villa@reception.oddos.eu",
+  )
+    ? RESTAURANTS[0]
+    : normalizedRecipients.includes("factures-parc@reception.oddos.eu")
+      ? RESTAURANTS[1]
+      : null;
+  const restaurantFromEmail =
+    restaurantFromRecipient ||
+    detectRestaurant(
+      JSON.stringify({
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+        from: email.from,
+        to: email.to,
+        received_for: email.received_for,
+      }),
+    );
   const results = await Promise.all(
     documents.map((attachment) =>
       processAttachment({
