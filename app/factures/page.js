@@ -10,6 +10,7 @@ const cats = [
   "Boissons",
   "Consommable",
   "Entretien",
+  "Carburant",
   "Mobilier",
   "Energie",
   "Assurance",
@@ -440,13 +441,13 @@ export default function Factures() {
                               onClick={() => viewDocument(item)}
                               disabled={busy}
                             >
-                              Voir le PDF
+                              Voir le justificatif
                             </button>
                             <button
                               onClick={() => shareDocument(item, "import")}
                               disabled={busy}
                             >
-                              Envoyer par e-mail
+                              Envoyer au comptable
                             </button>
                           </div>
                         ) : (
@@ -519,13 +520,13 @@ export default function Factures() {
                               onClick={() => viewDocument(x)}
                               disabled={busy}
                             >
-                              Voir le PDF
+                              Voir le justificatif
                             </button>
                             <button
                               onClick={() => shareDocument(x, "invoice")}
                               disabled={busy}
                             >
-                              Envoyer par e-mail
+                              Envoyer au comptable
                             </button>
                           </>
                         )}

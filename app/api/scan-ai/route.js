@@ -10,6 +10,7 @@ const CATEGORIES = [
   "Boissons",
   "Consommable",
   "Entretien",
+  "Carburant",
   "Mobilier",
   "Energie",
   "Assurance",

@@ -21,6 +21,7 @@ const cats = [
   "Boissons",
   "Consommable",
   "Entretien",
+  "Carburant",
   "Mobilier",
   "Energie",
   "Assurance",
@@ -51,6 +52,7 @@ export default function VatPage() {
     [msg, setMsg] = useState(""),
     [saving, setSaving] = useState(false),
     [lines, setLines] = useState([line()]),
+    [receiptFile, setReceiptFile] = useState(null),
     [zRows, setZRows] = useState([]),
     [editingZ, setEditingZ] = useState(null);
   const [inv, setInv] = useState({
@@ -251,6 +253,32 @@ export default function VatPage() {
         setSaving(false);
         return setMsg("Erreur TVA : " + le.message);
       }
+      if (receiptFile) {
+        const {
+          data: { session },
+        } = await sb.auth.getSession();
+        const formData = new FormData();
+        formData.append("invoiceId", p.id);
+        formData.append("file", receiptFile);
+        const response = await fetch("/api/manual-receipt", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session?.access_token || ""}` },
+          body: formData,
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          await sb
+            .from("supplier_invoice_vat_lines")
+            .delete()
+            .eq("invoice_id", p.id);
+          await sb.from("supplier_invoices").delete().eq("id", p.id);
+          setSaving(false);
+          return setMsg(
+            "Erreur justificatif : " +
+              (result?.error || "la photo n’a pas pu être archivée."),
+          );
+        }
+      }
     } else {
       if (!editingZ) {
         const { data: x } = await sb
@@ -343,6 +371,7 @@ export default function VatPage() {
     const savedDocumentType = inv.document_type;
     setSaving(false);
     setLines([line()]);
+    setReceiptFile(null);
     if (type === "invoice")
       setInv((v) => ({
         ...v,
@@ -507,6 +536,34 @@ export default function VatPage() {
                     automatiquement soustrait des achats et de la TVA.
                   </p>
                 )}
+                <label
+                  style={{
+                    display: "block",
+                    marginTop: 18,
+                    padding: 16,
+                    border: "2px dashed #9aa58a",
+                    borderRadius: 12,
+                    background: "#f7f8f3",
+                  }}
+                >
+                  Photo du justificatif (facultatif)
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/heic,image/*"
+                    capture="environment"
+                    onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+                    style={input}
+                  />
+                  <small style={{ display: "block", marginTop: 8 }}>
+                    Prenez la facturette en photo ou choisissez une image déjà
+                    enregistrée. Maximum 10 Mo.
+                  </small>
+                  {receiptFile && (
+                    <b style={{ display: "block", marginTop: 8 }}>
+                      ✓ {receiptFile.name}
+                    </b>
+                  )}
+                </label>
               </>
             ) : (
               <>

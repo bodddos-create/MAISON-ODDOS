@@ -136,7 +136,10 @@ async function resolveDocument(config, { invoiceId, importId, dailySaleId }) {
 
   return {
     path: invoice.document_path,
-    filename: imports?.[0]?.filename || "document-maison-oddos.pdf",
+    filename:
+      imports?.[0]?.filename ||
+      invoice.document_path.split("/").pop() ||
+      "document-maison-oddos",
     supplier: invoice.supplier || "Maison Oddos",
     number: invoice.invoice_number || "",
     documentType: invoice.document_type,
@@ -160,7 +163,7 @@ async function downloadDocument(config, path) {
   );
 
   if (!response.ok) {
-    throw new Error(`Téléchargement du PDF impossible (${response.status})`);
+    throw new Error(`Téléchargement du justificatif impossible (${response.status})`);
   }
 
   return response.arrayBuffer();
