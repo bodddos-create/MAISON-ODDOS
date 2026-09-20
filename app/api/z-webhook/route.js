@@ -538,9 +538,12 @@ export async function POST(request) {
       });
     }
 
-    const restaurant = detectRestaurant(
-      JSON.stringify({ payload: eventData, email }),
+    const restaurantFromSubject = detectRestaurant(
+      [email.subject, eventData.subject].filter(Boolean).join(" "),
     );
+    const restaurant =
+      restaurantFromSubject ||
+      detectRestaurant(JSON.stringify({ payload: eventData, email }));
 
     let attachments = Array.isArray(email.attachments) ? email.attachments : [];
 
