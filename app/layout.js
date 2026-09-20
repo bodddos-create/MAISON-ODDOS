@@ -1,4 +1,5 @@
 import './globals.css'
+import './reservation.css'
 import InvoiceTabRouter from './InvoiceTabRouter'
 import TTCDisplayEnhancer from './TTCDisplayEnhancer'
 import PersonnelDailyCost from './PersonnelDailyCost'

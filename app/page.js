@@ -760,13 +760,14 @@ export default function Home() {
           ["charges", "Charges"],
           ["historique", "Historique"],
           ["evolution-ca", "Évolution du CA"],
+          ["reservations", "Réservations"],
         ].map(([k, l]) => (
           <button
             key={k}
             className={tab === k ? "active" : ""}
             onClick={() => {
-              if (k === "evolution-ca") {
-                window.location.href = "/evolution-ca";
+              if (["evolution-ca", "reservations"].includes(k)) {
+                window.location.href = `/${k}`;
                 return;
               }
               setTab(k);
