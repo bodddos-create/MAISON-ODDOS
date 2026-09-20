@@ -83,7 +83,9 @@ export default function Home() {
     [chartMonth, setChartMonth] = useState(today().slice(0, 7)),
     [chartYear, setChartYear] = useState(today().slice(0, 4)),
     [saveMsg, setSaveMsg] = useState(""),
-    [saving, setSaving] = useState(false);
+    [saving, setSaving] = useState(false),
+    [documentMsg, setDocumentMsg] = useState(""),
+    [documentBusy, setDocumentBusy] = useState(false);
   const [z, setZ] = useState({
     establishment_id: "",
     business_date: today(),
@@ -641,6 +643,72 @@ export default function Home() {
     );
   const name = (id) => ests.find((e) => e.id === id)?.name || "—",
     employeeName = (id) => employees.find((e) => e.id === id)?.full_name || "—";
+  const archivedZ = (item) =>
+    String(item?.z_document_path || "").startsWith("z-reports/");
+  async function zDocumentUrl(item) {
+    if (!archivedZ(item)) {
+      throw new Error("Le PDF original de ce Z n’est pas encore archivé.");
+    }
+
+    const { data, error } = await sb.storage
+      .from("accounting-documents")
+      .createSignedUrl(item.z_document_path, 3600);
+
+    if (error || !data?.signedUrl) {
+      throw new Error(error?.message || "Lien du Z indisponible.");
+    }
+
+    return data.signedUrl;
+  }
+  async function viewZDocument(item) {
+    setDocumentMsg("");
+    setDocumentBusy(true);
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    try {
+      const url = await zDocumentUrl(item);
+      if (tab) tab.location.href = url;
+      else window.location.href = url;
+    } catch (error) {
+      tab?.close();
+      setDocumentMsg("Erreur : " + error.message);
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
+  async function emailZDocument(item) {
+    const recipient = window.prompt("Adresse e-mail du destinataire :");
+    if (!recipient) return;
+
+    setDocumentMsg("");
+    setDocumentBusy(true);
+    try {
+      const {
+        data: { session },
+      } = await sb.auth.getSession();
+      if (!session?.access_token) throw new Error("Session expirée.");
+
+      const response = await fetch("/api/invoice-share", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ to: recipient, dailySaleId: item.id }),
+      });
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result?.error || "Envoi impossible.");
+      }
+
+      setDocumentMsg(`✓ Rapport Z envoyé à ${recipient}.`);
+    } catch (error) {
+      setDocumentMsg("Erreur : " + error.message);
+    } finally {
+      setDocumentBusy(false);
+    }
+  }
   const EstSelect = ({ value, onChange }) => (
     <select required value={value} onChange={onChange} style={inputStyle}>
       <option value="">Choisir…</option>
@@ -815,19 +883,39 @@ export default function Home() {
             <TrendChart data={chartData} />
           </div>
           <h3>Dernières journées</h3>
+          {documentMsg && (
+            <p>
+              <b>{documentMsg}</b>
+            </p>
+          )}
           <Table
-            rows={fs
-              .slice(0, 8)
-              .map((x) => [
-                x.business_date,
-                name(x.establishment_id),
-                euro(
-                  Number(x.lunch_sales_ht || 0) +
-                    Number(x.dinner_sales_ht || 0),
-                ),
-                Number(x.lunch_covers || 0) + Number(x.dinner_covers || 0),
-              ])}
-            heads={["Date", "Établissement", "CA HT", "Couverts"]}
+            rows={fs.slice(0, 8).map((x) => [
+              x.business_date,
+              name(x.establishment_id),
+              euro(
+                Number(x.lunch_sales_ht || 0) + Number(x.dinner_sales_ht || 0),
+              ),
+              Number(x.lunch_covers || 0) + Number(x.dinner_covers || 0),
+              archivedZ(x) ? (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => viewZDocument(x)}
+                    disabled={documentBusy}
+                  >
+                    Voir le PDF
+                  </button>
+                  <button
+                    onClick={() => emailZDocument(x)}
+                    disabled={documentBusy}
+                  >
+                    Envoyer par e-mail
+                  </button>
+                </div>
+              ) : (
+                "—"
+              ),
+            ])}
+            heads={["Date", "Établissement", "CA HT", "Couverts", "Document Z"]}
           />
         </section>
       )}
@@ -1121,8 +1209,7 @@ export default function Home() {
           </p>
           <Table
             rows={fi.slice(0, 20).map((x) => {
-              const documentSign =
-                x.document_type === "credit_note" ? -1 : 1;
+              const documentSign = x.document_type === "credit_note" ? -1 : 1;
               return [
                 x.invoice_date,
                 x.document_type === "credit_note" ? "Avoir" : "Facture",
@@ -1359,6 +1446,11 @@ export default function Home() {
       {tab === "historique" && (
         <section>
           <h2>Historique des Z</h2>
+          {documentMsg && (
+            <p>
+              <b>{documentMsg}</b>
+            </p>
+          )}
           <Table
             rows={fs.map((x) => [
               x.business_date,
@@ -1368,8 +1460,33 @@ export default function Home() {
               ),
               Number(x.lunch_covers || 0) + Number(x.dinner_covers || 0),
               x.z_scan_status || "manual",
+              archivedZ(x) ? (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button
+                    onClick={() => viewZDocument(x)}
+                    disabled={documentBusy}
+                  >
+                    Voir le PDF
+                  </button>
+                  <button
+                    onClick={() => emailZDocument(x)}
+                    disabled={documentBusy}
+                  >
+                    Envoyer par e-mail
+                  </button>
+                </div>
+              ) : (
+                "—"
+              ),
             ])}
-            heads={["Date", "Établissement", "CA HT", "Couverts", "Origine"]}
+            heads={[
+              "Date",
+              "Établissement",
+              "CA HT",
+              "Couverts",
+              "Origine",
+              "Document Z",
+            ]}
           />
         </section>
       )}

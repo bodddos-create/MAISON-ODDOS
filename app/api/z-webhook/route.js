@@ -23,6 +23,14 @@ const toNumber = (value) => {
 const roundMoney = (value) =>
   Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
+const safePathPart = (value) =>
+  String(value || "document")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120) || "document";
+
 function detectRestaurant(value) {
   const text = clean(value);
 
@@ -103,6 +111,46 @@ async function supabaseRequest(path, options = {}) {
   return body;
 }
 
+async function storeZDocument({ emailId, attachmentId, filename, buffer }) {
+  const supabaseUrl = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
+  const secretKey = process.env.SUPABASE_SECRET_KEY;
+
+  if (!supabaseUrl || !secretKey) {
+    throw new Error("SUPABASE_URL ou SUPABASE_SECRET_KEY absente");
+  }
+
+  const now = new Date();
+  const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const documentPath = `z-reports/${month}/${safePathPart(emailId)}/${safePathPart(attachmentId)}-${safePathPart(filename)}`;
+  const encodedPath = documentPath
+    .split("/")
+    .map((part) => encodeURIComponent(part))
+    .join("/");
+  const response = await fetch(
+    `${supabaseUrl}/storage/v1/object/accounting-documents/${encodedPath}`,
+    {
+      method: "POST",
+      headers: {
+        apikey: secretKey,
+        Authorization: `Bearer ${secretKey}`,
+        "Content-Type": "application/pdf",
+        "x-upsert": "true",
+      },
+      body: buffer,
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    const details = await response.text();
+    throw new Error(
+      `Archivage du Z impossible : ${response.status} ${details}`,
+    );
+  }
+
+  return documentPath;
+}
+
 function calculateConfidence(result) {
   const confidence = result?.confidence || {};
 
@@ -118,7 +166,7 @@ function calculateConfidence(result) {
   );
 }
 
-async function saveZReport({ restaurant, filename, analysis }) {
+async function saveZReport({ restaurant, filename, documentPath, analysis }) {
   const result = analysis?.result;
 
   if (!result) {
@@ -211,6 +259,19 @@ async function saveZReport({ restaurant, filename, analysis }) {
   const existing = existingRows[0] || null;
 
   if (existing?.z_scan_status === "validated") {
+    await supabaseRequest(
+      `daily_sales?id=eq.${encodeURIComponent(existing.id)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          z_document_path: documentPath,
+          z_document_name: filename,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+
     return {
       saved: false,
       needs_review: false,
@@ -227,7 +288,8 @@ async function saveZReport({ restaurant, filename, analysis }) {
     dinner_sales_ht: dinnerSalesHt,
     lunch_covers: covers,
     dinner_covers: 0,
-    z_document_path: filename,
+    z_document_path: documentPath,
+    z_document_name: filename,
     z_scan_status: "analyzed",
     z_scan_confidence: confidence,
     updated_at: new Date().toISOString(),
@@ -293,6 +355,7 @@ async function saveZReport({ restaurant, filename, analysis }) {
     total_ttc: roundMoney(toNumber(result.ca)),
     covers,
     vat_lines_saved: vatLines.length,
+    document_path: documentPath,
   };
 }
 
@@ -406,6 +469,15 @@ export async function POST(request) {
     const pdfBuffer = await fileResponse.arrayBuffer();
 
     const filename = attachment.filename || attachment.name || "rapport-z.pdf";
+    if (pdfBuffer.byteLength > 10 * 1024 * 1024) {
+      throw new Error("PDF trop volumineux (10 Mo maximum)");
+    }
+    const documentPath = await storeZDocument({
+      emailId,
+      attachmentId,
+      filename,
+      buffer: pdfBuffer,
+    });
 
     const formData = new FormData();
 
@@ -442,6 +514,7 @@ export async function POST(request) {
     const persistence = await saveZReport({
       restaurant,
       filename,
+      documentPath,
       analysis,
     });
 

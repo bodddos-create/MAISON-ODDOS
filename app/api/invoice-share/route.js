@@ -79,7 +79,31 @@ async function supabaseGet(config, path) {
   return response.json();
 }
 
-async function resolveDocument(config, { invoiceId, importId }) {
+async function resolveDocument(config, { invoiceId, importId, dailySaleId }) {
+  if (dailySaleId) {
+    const rows = await supabaseGet(
+      config,
+      `daily_sales?id=eq.${encodeURIComponent(dailySaleId)}&select=id,z_document_path,z_document_name,business_date,establishment_id&limit=1`,
+    );
+    const sale = rows?.[0];
+
+    if (!sale?.z_document_path)
+      throw new Error("PDF original du Z introuvable");
+
+    const establishments = await supabaseGet(
+      config,
+      `establishments?id=eq.${encodeURIComponent(sale.establishment_id)}&select=name&limit=1`,
+    );
+
+    return {
+      path: sale.z_document_path,
+      filename: sale.z_document_name || "rapport-z.pdf",
+      supplier: establishments?.[0]?.name || "Maison Oddos",
+      number: sale.business_date || "",
+      documentType: "z",
+    };
+  }
+
   if (importId) {
     const rows = await supabaseGet(
       config,
@@ -146,7 +170,7 @@ export async function POST(request) {
   try {
     const config = configuration();
     await requireManagement(request, config);
-    const { to, invoiceId, importId } = await request.json();
+    const { to, invoiceId, importId, dailySaleId } = await request.json();
     const recipient = String(to || "")
       .trim()
       .toLowerCase();
@@ -158,23 +182,40 @@ export async function POST(request) {
       );
     }
 
-    if (!invoiceId && !importId) {
+    if (!invoiceId && !importId && !dailySaleId) {
       return NextResponse.json(
         { error: "Document non identifié" },
         { status: 400 },
       );
     }
 
-    const document = await resolveDocument(config, { invoiceId, importId });
+    const document = await resolveDocument(config, {
+      invoiceId,
+      importId,
+      dailySaleId,
+    });
     const file = await downloadDocument(config, document.path);
-    const label = document.documentType === "credit_note" ? "Avoir" : "Facture";
-    const reference = document.number ? ` n° ${document.number}` : "";
+    const label =
+      document.documentType === "z"
+        ? "Rapport Z"
+        : document.documentType === "credit_note"
+          ? "Avoir"
+          : "Facture";
+    const reference = document.number
+      ? document.documentType === "z"
+        ? ` du ${document.number}`
+        : ` n° ${document.number}`
+      : "";
+    const description =
+      document.documentType === "z"
+        ? `le rapport Z de ${document.supplier}${reference}`
+        : `le document ${document.supplier}${reference}`;
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.resendKey}`,
         "Content-Type": "application/json",
-        "Idempotency-Key": `invoice-share-${invoiceId || importId}-${recipient}-${Date.now()}`,
+        "Idempotency-Key": `document-share-${invoiceId || importId || dailySaleId}-${recipient}-${Date.now()}`,
       },
       body: JSON.stringify({
         from:
@@ -182,7 +223,7 @@ export async function POST(request) {
           "Maison Oddos <factures@reception.oddos.eu>",
         to: [recipient],
         subject: `${label}${reference} — ${document.supplier}`,
-        text: `Bonjour,\n\nVeuillez trouver en pièce jointe le document ${document.supplier}${reference}.\n\nBien cordialement,\nMaison Oddos`,
+        text: `Bonjour,\n\nVeuillez trouver en pièce jointe ${description}.\n\nBien cordialement,\nMaison Oddos`,
         attachments: [
           {
             filename: document.filename,
