@@ -32,7 +32,10 @@ export async function POST(req) {
 
     const form = await req.formData();
     const file = form.get("file");
-    const type = form.get("type") === "z" ? "z" : "invoice";
+    const requestedType = String(form.get("type") || "");
+    const type = ["z", "z_history"].includes(requestedType)
+      ? requestedType
+      : "invoice";
 
     if (!file || typeof file.arrayBuffer !== "function") {
       return NextResponse.json(
@@ -64,8 +67,18 @@ export async function POST(req) {
     }
 
     const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
-    const schema = type === "invoice" ? invoiceSchema : zSchema;
-    const instructions = type === "invoice" ? invoicePrompt : zPrompt;
+    const schema =
+      type === "invoice"
+        ? invoiceSchema
+        : type === "z_history"
+          ? zHistorySchema
+          : zSchema;
+    const instructions =
+      type === "invoice"
+        ? invoicePrompt
+        : type === "z_history"
+          ? zHistoryPrompt
+          : zPrompt;
 
     const documentInput = isPdf
       ? {
@@ -104,7 +117,12 @@ export async function POST(req) {
       text: {
         format: {
           type: "json_schema",
-          name: type === "invoice" ? "supplier_invoice" : "z_report",
+          name:
+            type === "invoice"
+              ? "supplier_invoice"
+              : type === "z_history"
+                ? "z_history_report"
+                : "z_report",
           strict: true,
           schema,
         },
@@ -258,9 +276,36 @@ const zSchema = {
   },
 };
 
+const historyPeriod = {
+  type: "object",
+  additionalProperties: false,
+  required: ["granularity", "date", "ttc", "covers", "confidence"],
+  properties: {
+    granularity: { type: "string", enum: ["day", "month"] },
+    date: { type: "string" },
+    ttc: { type: ["number", "null"] },
+    covers: { type: ["number", "null"] },
+    confidence,
+  },
+};
+
+const zHistorySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["restaurant", "year", "totalTtc", "periods"],
+  properties: {
+    restaurant: field(),
+    year: field("number"),
+    totalTtc: field("number"),
+    periods: { type: "array", items: historyPeriod },
+  },
+};
+
 const invoicePrompt = `Lis ce document fournisseur. Retourne uniquement le JSON demandé. documentType vaut exactement "invoice" pour une facture ou "credit_note" pour un avoir, uniquement d'après une mention explicite du document. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(", ")}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux en valeur positive, y compris pour un avoir. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA, toujours en valeur positive. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`;
 
 const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`;
+
+const zHistoryPrompt = `Lis ce récapitulatif historique de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. year est l'année explicitement couverte par le rapport. totalTtc est le CA/total TTC annuel uniquement s'il est explicitement imprimé. periods contient chaque total TTC explicitement imprimé par jour ou par mois : granularity vaut "day" avec date YYYY-MM-DD, ou "month" avec date YYYY-MM-01. covers est le nombre de couverts de la même période uniquement s'il est indiqué. Ne calcule pas une période en additionnant des lignes, ne transforme pas un cumul en période et n'invente aucune valeur. Si le document ne donne qu'un total annuel, periods doit rester vide.`;
 
 function val(x) {
   return x && x.value != null ? String(x.value) : "";
@@ -301,6 +346,39 @@ function lines(a) {
 }
 
 function normalize(p, type) {
+  if (type === "z_history") {
+    const year = Number(p?.year?.value);
+    return {
+      restaurant: val(p.restaurant),
+      year: Number.isInteger(year) ? String(year) : "",
+      totalTtc: num(p.totalTtc),
+      periods: Array.isArray(p.periods)
+        ? p.periods
+            .filter(
+              (item) =>
+                item &&
+                ["day", "month"].includes(item.granularity) &&
+                typeof item.date === "string" &&
+                Number.isFinite(item.ttc),
+            )
+            .map((item) => ({
+              granularity: item.granularity,
+              date: item.date,
+              ttc: String(Math.round(item.ttc * 100) / 100),
+              covers: Number.isFinite(item.covers)
+                ? String(Math.max(0, Math.round(item.covers)))
+                : "",
+              confidence: conf(item),
+            }))
+        : [],
+      confidence: {
+        restaurant: conf(p.restaurant),
+        year: conf(p.year),
+        totalTtc: conf(p.totalTtc),
+      },
+    };
+  }
+
   if (type === "z") {
     return {
       restaurant: val(p.restaurant),

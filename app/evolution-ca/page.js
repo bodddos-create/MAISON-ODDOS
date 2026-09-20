@@ -178,6 +178,7 @@ export default function EvolutionCA() {
   const [establishments, setEstablishments] = useState([]);
   const [sales, setSales] = useState([]);
   const [vatLines, setVatLines] = useState([]);
+  const [historical, setHistorical] = useState([]);
   const [selectedEstablishment, setSelectedEstablishment] = useState("all");
   const [mode, setMode] = useState("year");
   const [loading, setLoading] = useState(true);
@@ -211,13 +212,19 @@ export default function EvolutionCA() {
         "daily_sale_id,amount_ttc",
         "daily_sale_id",
       ),
+      fetchAll(
+        "historical_ca",
+        "id,establishment_id,period_start,period_type,amount_ttc,covers,source_filename",
+        "period_start",
+      ),
     ])
-      .then(([establishmentResult, saleRows, vatRows]) => {
+      .then(([establishmentResult, saleRows, vatRows, historicalRows]) => {
         if (!active) return;
         if (establishmentResult.error) throw establishmentResult.error;
         setEstablishments(establishmentResult.data || []);
         setSales(saleRows);
         setVatLines(vatRows);
+        setHistorical(historicalRows);
       })
       .catch((loadError) => {
         if (active) setError(loadError.message || "Chargement impossible");
@@ -235,7 +242,7 @@ export default function EvolutionCA() {
       vatBySale[line.daily_sale_id] =
         (vatBySale[line.daily_sale_id] || 0) + Number(line.amount_ttc || 0);
     });
-    const normalized = sales
+    const liveRows = sales
       .filter(
         (sale) =>
           selectedEstablishment === "all" ||
@@ -252,6 +259,69 @@ export default function EvolutionCA() {
           covers:
             Number(sale.lunch_covers || 0) + Number(sale.dinner_covers || 0),
         };
+      });
+    const historyRows = historical.filter(
+      (row) =>
+        selectedEstablishment === "all" ||
+        row.establishment_id === selectedEstablishment,
+    );
+    const liveKeys = new Set(
+      liveRows.map(
+        (row) => `${row.establishment_id}|${String(row.business_date).slice(0, 10)}`,
+      ),
+    );
+    const historicalDays = historyRows
+      .filter((row) => row.period_type === "day")
+      .filter(
+        (row) =>
+          !liveKeys.has(
+            `${row.establishment_id}|${String(row.period_start).slice(0, 10)}`,
+          ),
+      )
+      .map((row) => ({
+        id: `history-${row.id}`,
+        establishment_id: row.establishment_id,
+        business_date: row.period_start,
+        ca: Number(row.amount_ttc || 0),
+        covers: Number(row.covers || 0),
+        historical: true,
+      }));
+    const monthlyHistory = historyRows
+      .filter(
+        (row) =>
+          row.period_type === "month" &&
+          Number(String(row.period_start).slice(0, 4)) < currentYear,
+      )
+      .map((row) => ({
+        id: `history-${row.id}`,
+        establishment_id: row.establishment_id,
+        business_date: row.period_start,
+        ca: Number(row.amount_ttc || 0),
+        covers: Number(row.covers || 0),
+        historical: true,
+        historicalMonth: true,
+      }));
+    const monthlyKeys = new Set(
+      monthlyHistory.map(
+        (row) =>
+          `${row.establishment_id}|${String(row.business_date).slice(0, 7)}`,
+      ),
+    );
+    const normalized = [...liveRows, ...historicalDays]
+      .filter(
+        (row) =>
+          !monthlyKeys.has(
+            `${row.establishment_id}|${String(row.business_date).slice(0, 7)}`,
+          ),
+      )
+      .concat(monthlyHistory);
+    const annualTotals = {};
+    historyRows
+      .filter((row) => row.period_type === "year")
+      .forEach((row) => {
+        const year = Number(String(row.period_start).slice(0, 4));
+        annualTotals[year] =
+          (annualTotals[year] || 0) + Number(row.amount_ttc || 0);
       });
     const labels = periodDates(reference, mode);
     const stats = {};
@@ -334,8 +404,16 @@ export default function EvolutionCA() {
         ? stats[currentYear].ca * (priorFull / stats[currentYear - 1].ca)
         : null;
 
-    return { labels, stats, series, monthly, projection };
-  }, [sales, vatLines, selectedEstablishment, mode, reference, currentYear]);
+    return { labels, stats, series, monthly, projection, annualTotals };
+  }, [
+    sales,
+    vatLines,
+    historical,
+    selectedEstablishment,
+    mode,
+    reference,
+    currentYear,
+  ]);
 
   if (user === undefined || (user && loading)) {
     return (
@@ -373,6 +451,7 @@ export default function EvolutionCA() {
           <div className="brand">MAISON ODDOS</div>
           <h1>Évolution du chiffre d’affaires</h1>
         </div>
+
         <a href="/">
           <button>← Pilotage</button>
         </a>
@@ -529,6 +608,39 @@ export default function EvolutionCA() {
           </table>
         </div>
 
+        <h2 style={{ marginTop: 28 }}>Clôtures annuelles importées</h2>
+        <div className="table">
+          <table>
+            <thead>
+              <tr>
+                <th>Année</th>
+                <th>CA TTC annuel</th>
+                <th>Évolution annuelle</th>
+              </tr>
+            </thead>
+            <tbody>
+              {years.map((year, index) => {
+                const value = report.annualTotals[year] || 0;
+                const previousAnnual = report.annualTotals[year - 1] || 0;
+                const annualRate = previousAnnual
+                  ? ((value - previousAnnual) / previousAnnual) * 100
+                  : null;
+                return (
+                  <tr key={year}>
+                    <td>
+                      <b>
+                        {index === 0 ? "N" : `N−${index}`} · {year}
+                      </b>
+                    </td>
+                    <td>{value ? money(value) : "—"}</td>
+                    <td>{value ? percent(annualRate) : "—"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
         {mode === "year" && (
           <>
             <h2 style={{ marginTop: 28 }}>Détail mensuel à date comparable</h2>
@@ -571,7 +683,9 @@ export default function EvolutionCA() {
           <small>
             Le CA TTC provient des ventilations TVA des Z. Lorsqu’une ancienne
             journée ne possède pas de ventilation TVA, le montant saisi est
-            utilisé.
+            utilisé. Les récapitulatifs historiques envoyés par e-mail
+            complètent automatiquement les années précédentes sans créer de
+            faux Z journalier.
           </small>
         </p>
       </section>

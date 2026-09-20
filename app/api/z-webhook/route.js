@@ -359,6 +359,105 @@ async function saveZReport({ restaurant, filename, documentPath, analysis }) {
   };
 }
 
+async function saveHistoricalZ({
+  restaurant,
+  filename,
+  documentPath,
+  emailId,
+  analysis,
+}) {
+  const result = analysis?.result;
+  const resolvedRestaurant = restaurant || detectRestaurant(result?.restaurant);
+  const year = Number(result?.year);
+
+  if (!resolvedRestaurant) {
+    return { saved: false, needs_review: true, reason: "Restaurant non identifié" };
+  }
+  if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+    return { saved: false, needs_review: true, reason: "Année absente ou invalide" };
+  }
+
+  const rows = [];
+  const totalTtc = roundMoney(toNumber(result?.totalTtc));
+  if (totalTtc > 0) {
+    rows.push({
+      establishment_id: resolvedRestaurant.establishment_id,
+      period_start: `${year}-01-01`,
+      period_type: "year",
+      amount_ttc: totalTtc,
+      covers: null,
+      confidence: Number(result?.confidence?.totalTtc) || null,
+      source_document_path: documentPath,
+      source_filename: filename,
+      source_email_id: emailId,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  for (const period of Array.isArray(result?.periods) ? result.periods : []) {
+    const periodType = period?.granularity;
+    const date = String(period?.date || "");
+    const amountTtc = roundMoney(toNumber(period?.ttc));
+    const validDate =
+      periodType === "day"
+        ? /^\d{4}-\d{2}-\d{2}$/.test(date)
+        : periodType === "month" && /^\d{4}-\d{2}-01$/.test(date);
+    if (!validDate || !date.startsWith(`${year}-`) || amountTtc <= 0) continue;
+    rows.push({
+      establishment_id: resolvedRestaurant.establishment_id,
+      period_start: date,
+      period_type: periodType,
+      amount_ttc: amountTtc,
+      covers: toNumber(period?.covers) > 0
+        ? Math.round(toNumber(period.covers))
+        : null,
+      confidence: Number(period?.confidence) || null,
+      source_document_path: documentPath,
+      source_filename: filename,
+      source_email_id: emailId,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  if (!rows.length) {
+    return {
+      saved: false,
+      needs_review: true,
+      reason: "Aucun total historique lisible",
+    };
+  }
+
+  const uniqueRows = [
+    ...new Map(
+      rows.map((row) => [
+        `${row.establishment_id}|${row.period_start}|${row.period_type}`,
+        row,
+      ]),
+    ).values(),
+  ];
+
+  const savedRows = await supabaseRequest(
+    "historical_ca?on_conflict=establishment_id,period_start,period_type",
+    {
+      method: "POST",
+      headers: {
+        Prefer: "resolution=merge-duplicates,return=representation",
+      },
+      body: JSON.stringify(uniqueRows),
+    },
+  );
+
+  return {
+    saved: true,
+    historical: true,
+    needs_review: false,
+    year,
+    annual_total_ttc: totalTtc || null,
+    periods_saved: savedRows?.filter((row) => row.period_type !== "year").length || 0,
+    document_path: documentPath,
+  };
+}
+
 export async function POST(request) {
   const url = new URL(request.url);
 
@@ -478,6 +577,13 @@ export async function POST(request) {
       filename,
       buffer: pdfBuffer,
     });
+    const historicalMarker = clean(
+      [email.subject, eventData.subject, filename].filter(Boolean).join(" "),
+    );
+    const isHistorical =
+      /\b(historique|annuel|annuelle|general|generale|recap|recapitulatif|synthese|archive)\b/.test(
+        historicalMarker,
+      ) && /\b20\d{2}\b/.test(historicalMarker);
 
     const formData = new FormData();
 
@@ -489,7 +595,7 @@ export async function POST(request) {
       filename,
     );
 
-    formData.append("type", "z");
+    formData.append("type", isHistorical ? "z_history" : "z");
 
     const scanResponse = await fetch(`${url.origin}/api/scan-ai`, {
       method: "POST",
@@ -511,12 +617,20 @@ export async function POST(request) {
       throw new Error(`Analyse IA ${scanResponse.status}: ${scanText}`);
     }
 
-    const persistence = await saveZReport({
-      restaurant,
-      filename,
-      documentPath,
-      analysis,
-    });
+    const persistence = isHistorical
+      ? await saveHistoricalZ({
+          restaurant,
+          filename,
+          documentPath,
+          emailId,
+          analysis,
+        })
+      : await saveZReport({
+          restaurant,
+          filename,
+          documentPath,
+          analysis,
+        });
 
     return Response.json({
       ok: true,
