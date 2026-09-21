@@ -349,16 +349,18 @@ export default function EvolutionCA() {
         return cumulative;
       });
       const covers = yearRows.reduce((sum, sale) => sum + sale.covers, 0);
-      const openUnits = new Set(
+      const hasMonthlyHistory = yearRows.some((sale) => sale.historicalMonth);
+      const computedOpenUnits = new Set(
         yearRows
           .filter((sale) => sale.ca > 0)
           .map((sale) => `${sale.establishment_id}|${sale.business_date}`),
       ).size;
+      const openUnits = hasMonthlyHistory ? null : computedOpenUnits;
       stats[year] = {
         ca: cumulative,
         covers,
         openUnits,
-        average: openUnits ? cumulative / openUnits : 0,
+        average: openUnits ? cumulative / openUnits : null,
         ticket: covers ? cumulative / covers : 0,
       };
     });
@@ -526,7 +528,9 @@ export default function EvolutionCA() {
         <div className="grid">
           <article className="card">
             <span>CA moyen / jour d’ouverture</span>
-            <strong>{money(current.average)}</strong>
+            <strong>
+              {current.average == null ? "—" : money(current.average)}
+            </strong>
           </article>
           <article className="card">
             <span>Couverts</span>
@@ -590,7 +594,7 @@ export default function EvolutionCA() {
                         ? `${difference >= 0 ? "+" : ""}${money(difference)}`
                         : "—"}
                     </td>
-                    <td>{value.openUnits || "—"}</td>
+                    <td>{value.openUnits ?? "—"}</td>
                     <td>
                       {value.covers
                         ? value.covers.toLocaleString("fr-FR")
