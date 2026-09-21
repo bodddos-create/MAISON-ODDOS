@@ -17,6 +17,13 @@ const statusLabels = {
 const dayLabels = ["Dimanche", "Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi"];
 const serviceLabels = ["Déjeuner", "Dîner"];
 const timeValue = (value) => String(value || "").slice(0, 5);
+const parisToday = () => new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Europe/Paris",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+}).format(new Date());
+const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
 export default function ReservationsAdmin() {
   const [user, setUser] = useState(undefined);
@@ -27,6 +34,7 @@ export default function ReservationsAdmin() {
   const [exceptions, setExceptions] = useState([]);
   const [view, setView] = useState("reservations");
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
+  const [reservationEstablishment, setReservationEstablishment] = useState("all");
   const [filter, setFilter] = useState("upcoming");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -65,10 +73,15 @@ export default function ReservationsAdmin() {
     () => Object.fromEntries(establishments.map((item) => [item.id, item.name])),
     [establishments],
   );
-  const today = new Date().toISOString().slice(0, 10);
-  const visible = reservations.filter((reservation) => {
+  const today = parisToday();
+  const restaurantReservations = reservations.filter((reservation) => (
+    reservationEstablishment === "all" ||
+    reservation.establishment_id === reservationEstablishment
+  ));
+  const visible = restaurantReservations.filter((reservation) => {
+    if (reservation.reservation_date < today) return false;
     if (filter === "pending") return reservation.status === "pending";
-    if (filter === "upcoming") return reservation.reservation_date >= today && reservation.status !== "cancelled";
+    if (filter === "upcoming") return reservation.status !== "cancelled";
     return true;
   });
   const selectedSetting = settings.find((item) => item.establishment_id === selectedEstablishment) || {
@@ -107,6 +120,69 @@ export default function ReservationsAdmin() {
     } catch (error) {
       setMessage(`Erreur : ${error.message || "mise à jour impossible"}`);
     }
+  }
+
+  async function deleteReservation(reservation) {
+    const label = `${reservation.customer_name}, le ${new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR")}`;
+    if (!window.confirm(`Supprimer définitivement la réservation de ${label} ?`)) return;
+    setMessage("");
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.access_token) return setMessage("Votre session a expiré. Reconnectez-vous.");
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id: reservation.id }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      setReservations((items) => items.filter((item) => item.id !== reservation.id));
+      setMessage("Réservation supprimée.");
+    } catch (error) {
+      setMessage(`Erreur : ${error.message || "suppression impossible"}`);
+    }
+  }
+
+  function exportCustomerEmails() {
+    const selectedRows = reservations.filter((reservation) => (
+      reservation.email &&
+      (reservationEstablishment === "all" || reservation.establishment_id === reservationEstablishment)
+    ));
+    const customersByEmail = new Map();
+    selectedRows.forEach((reservation) => {
+      const email = String(reservation.email).trim().toLowerCase();
+      const current = customersByEmail.get(email);
+      if (!current || reservation.reservation_date > current.reservation_date) {
+        customersByEmail.set(email, reservation);
+      }
+    });
+    const customers = [...customersByEmail.values()].sort((a, b) => (
+      String(a.customer_name).localeCompare(String(b.customer_name), "fr")
+    ));
+    if (!customers.length) return setMessage("Aucune adresse e-mail à exporter pour cette sélection.");
+    const lines = [
+      ["Nom", "E-mail", "Téléphone", "Restaurant", "Dernière réservation"],
+      ...customers.map((reservation) => [
+        reservation.customer_name,
+        reservation.email,
+        reservation.phone,
+        names[reservation.establishment_id] || "Restaurant",
+        reservation.reservation_date,
+      ]),
+    ];
+    const csv = `\uFEFF${lines.map((line) => line.map(csvValue).join(";")).join("\r\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `clients-reservations-${reservationEstablishment === "all" ? "maison-oddos" : (names[reservationEstablishment] || "restaurant").toLowerCase().replaceAll(" ", "-")}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setMessage(`${customers.length} adresse${customers.length > 1 ? "s" : ""} e-mail exportée${customers.length > 1 ? "s" : ""}.`);
   }
 
   function changeSetting(field, value) {
@@ -180,9 +256,9 @@ export default function ReservationsAdmin() {
   if (user === undefined || (user && loading)) return <main><section><p>Chargement des réservations…</p></section></main>;
   if (!user) return <main><section><h2>Accès protégé</h2><p>Connectez-vous d’abord à Maison Oddos.</p><a href="/"><button>Retour à la connexion</button></a></section></main>;
 
-  const pendingCount = reservations.filter((item) => item.status === "pending").length;
-  const confirmedCount = reservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).length;
-  const upcomingCovers = reservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).reduce((sum, item) => sum + Number(item.party_size || 0), 0);
+  const pendingCount = restaurantReservations.filter((item) => item.status === "pending" && item.reservation_date >= today).length;
+  const confirmedCount = restaurantReservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).length;
+  const upcomingCovers = restaurantReservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).reduce((sum, item) => sum + Number(item.party_size || 0), 0);
 
   return (
     <main>
@@ -206,14 +282,23 @@ export default function ReservationsAdmin() {
             <article className="card"><span>Confirmées à venir</span><strong>{confirmedCount}</strong></article>
             <article className="card"><span>Couverts confirmés à venir</span><strong>{upcomingCovers}</strong></article>
           </div>
+          <div className="reservationToolbar">
+            <label>Restaurant
+              <select value={reservationEstablishment} onChange={(event) => setReservationEstablishment(event.target.value)}>
+                <option value="all">Tous les restaurants</option>
+                {establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <button className="secondary" onClick={exportCustomerEmails}>Exporter les e-mails clients</button>
+          </div>
           <div className="reservationFilters">
-            {[["upcoming", "À venir"], ["pending", "À confirmer"], ["all", "Toutes"]].map(([value, label]) => <button key={value} className={filter === value ? "active" : "secondary"} onClick={() => setFilter(value)}>{label}</button>)}
+            {[["upcoming", "À venir"], ["pending", "À confirmer"], ["all", "Toutes à venir"]].map(([value, label]) => <button key={value} className={filter === value ? "active" : "secondary"} onClick={() => setFilter(value)}>{label}</button>)}
           </div>
           {!visible.length ? <div className="formCard"><p>Aucune réservation dans cette vue.</p></div> : <div className="reservationList">
             {visible.map((reservation) => <article className="reservationCard" key={reservation.id}>
               <div className="reservationDate"><strong>{new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}</strong><span>{timeValue(reservation.reservation_time)}</span></div>
               <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span><h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <small>{reservation.notes}</small>}</div>
-              <div className="reservationActions"><button onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+              <div className="reservationActions"><button onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button></div>
             </article>)}
           </div>}
         </> : <div className="settingsLayout">
