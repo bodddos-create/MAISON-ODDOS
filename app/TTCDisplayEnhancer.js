@@ -191,8 +191,107 @@ export default function TTCDisplayEnhancer() {
             a + Number(x.amount_ttc != null ? x.amount_ttc : x.amount || 0),
           0,
         );
-        const estimatedResult = ca - achats - payroll - fixedTotal;
+        const achatsHt = inv.reduce(
+          (a, x) =>
+            a +
+            (x.document_type === "credit_note" ? -1 : 1) *
+              Number(x.amount_ht || 0),
+          0,
+        );
+        const fixedHt = monthFixes.reduce(
+          (a, x) => a + Number(x.amount || 0),
+          0,
+        );
         const estIds = est === "all" ? [VILLA, PARC] : [est];
+        const [selectedYear, selectedMonth] = ym.split("-").map(Number);
+        const daysInSelectedMonth = new Date(
+          selectedYear,
+          selectedMonth,
+          0,
+        ).getDate();
+        const now = new Date();
+        const currentYm = `${now.getFullYear()}-${String(
+          now.getMonth() + 1,
+        ).padStart(2, "0")}`;
+        const elapsedLimit =
+          ym < currentYm
+            ? daysInSelectedMonth
+            : ym === currentYm
+              ? Math.min(now.getDate(), daysInSelectedMonth)
+              : 0;
+        const openDaysThrough = (id, limit) => {
+          const custom = (openingDays || []).filter(
+            (x) =>
+              x.establishment_id === id &&
+              String(x.business_date).startsWith(ym),
+          );
+          const by = Object.fromEntries(
+            custom.map((x) => [String(x.business_date).slice(0, 10), x.is_open]),
+          );
+          let total = 0;
+          for (let day = 1; day <= limit; day++) {
+            const date = `${ym}-${String(day).padStart(2, "0")}`;
+            if (
+              date in by
+                ? by[date]
+                : isOpen(id, new Date(selectedYear, selectedMonth - 1, day))
+            ) {
+              total++;
+            }
+          }
+          return total;
+        };
+        const personnelToDate = estIds.reduce((sum, id) => {
+          const ratio = realOpenDays(id)
+            ? openDaysThrough(id, elapsedLimit) / realOpenDays(id)
+            : 0;
+          return sum + (payrollByEst[id] || 0) * ratio;
+        }, 0);
+        const fixedToDate = estIds.reduce((sum, id) => {
+          const ratio = realOpenDays(id)
+            ? openDaysThrough(id, elapsedLimit) / realOpenDays(id)
+            : 0;
+          const establishmentFixedHt = monthFixes
+            .filter((x) => x.establishment_id === id)
+            .reduce((amount, x) => amount + Number(x.amount || 0), 0);
+          return sum + establishmentFixedHt * ratio;
+        }, 0);
+        const marginToDateHt =
+          caHt - achatsHt - personnelToDate - fixedToDate;
+        const forecastCaHt = estIds.reduce((sum, id) => {
+          const establishmentRows = filtered.filter(
+            (x) => x.establishment_id === id,
+          );
+          const establishmentCaHt = establishmentRows.reduce(
+            (amount, x) =>
+              amount +
+              Number(x.lunch_sales_ht || 0) +
+              Number(x.dinner_sales_ht || 0),
+            0,
+          );
+          const establishmentDays = new Set(
+            establishmentRows
+              .filter(
+                (x) =>
+                  Number(x.lunch_sales_ht || 0) +
+                    Number(x.dinner_sales_ht || 0) >
+                  0,
+              )
+              .map((x) => x.business_date),
+          ).size;
+          return (
+            sum +
+            (establishmentDays
+              ? (establishmentCaHt / establishmentDays) * realOpenDays(id)
+              : 0)
+          );
+        }, 0);
+        const resultCaHt = ym < currentYm ? caHt : forecastCaHt;
+        const purchaseRateHt = caHt ? achatsHt / caHt : 0;
+        const projectedPurchasesHt =
+          ym < currentYm ? achatsHt : resultCaHt * purchaseRateHt;
+        const estimatedResult =
+          resultCaHt - projectedPurchasesHt - payroll - fixedHt;
         const monthInv = inv.filter(
           (x) => String(x.invoice_date || "").slice(0, 7) === ym,
         );
@@ -243,6 +342,8 @@ export default function TTCDisplayEnhancer() {
           const h = hero.parentElement?.querySelector("h2");
           if (h) h.textContent = money(ca);
         }
+        const resultLabel = main.querySelector(".hero .result span");
+        if (resultLabel) resultLabel.textContent = "Résultat estimé fin de mois HT";
         const result = main.querySelector(".hero .result strong");
         if (result) result.textContent = money(estimatedResult);
         setCard("CA estimé sur 22 jours", money(avg * 22));
@@ -266,14 +367,7 @@ export default function TTCDisplayEnhancer() {
               "margin-top:8px;font-size:13px;font-weight:800;padding:5px 9px;border-radius:8px;display:inline-block;color:#2f6b3a;background:#e8f3e8";
             purchaseCard.appendChild(pct);
           }
-          const achatsHt = inv.reduce(
-              (a, x) =>
-                a +
-                (x.document_type === "credit_note" ? -1 : 1) *
-                  Number(x.amount_ht || 0),
-              0,
-            ),
-            pctHt = caHt ? (achatsHt / caHt) * 100 : 0;
+          const pctHt = caHt ? (achatsHt / caHt) * 100 : 0;
           pct.textContent =
             pctHt.toLocaleString("fr-FR", {
               minimumFractionDigits: 2,
@@ -304,10 +398,6 @@ export default function TTCDisplayEnhancer() {
               maximumFractionDigits: 2,
             }) + " % du CA HT";
         };
-        const fixedHt = monthFixes.reduce(
-          (a, x) => a + Number(x.amount || 0),
-          0,
-        );
         addRate("Charges fixes", "fixed", fixedTotal, fixedHt);
         addRate("Personnel", "personnel", payroll, payroll);
         const greenCard = main.querySelector(
@@ -364,7 +454,16 @@ export default function TTCDisplayEnhancer() {
               maximumFractionDigits: 2,
             }) + " % du CA HT / jour";
         }
-        setCard("Marge après charges", money(estimatedResult));
+        const marginCard = [...main.querySelectorAll(".card")].find((card) => {
+          const title = card.querySelector("span")?.textContent?.trim();
+          return title === "Marge après charges" || title === "Marge à ce jour HT";
+        });
+        if (marginCard) {
+          const title = marginCard.querySelector("span");
+          const value = marginCard.querySelector("strong");
+          if (title) title.textContent = "Marge à ce jour HT";
+          if (value) value.textContent = money(marginToDateHt);
+        }
         const fixedPersonnelCard = main.querySelector(
           '[data-daily-fixed-personnel="true"] strong',
         );
