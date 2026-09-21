@@ -1,4 +1,5 @@
 import { processInvoiceEmail } from "./invoice";
+import { after } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -489,25 +490,12 @@ async function saveHistoricalZ({
   };
 }
 
-export async function POST(request) {
-  const url = new URL(request.url);
-
-  const suppliedSecret =
-    request.headers.get("x-z-webhook-secret") || url.searchParams.get("secret");
-
-  if (
-    !process.env.Z_IMPORT_SECRET ||
-    suppliedSecret !== process.env.Z_IMPORT_SECRET
-  ) {
-    return Response.json({ error: "Non autorisé" }, { status: 401 });
-  }
-
+async function processIncomingEmail({ url, payload }) {
   try {
     if (!process.env.RESEND_API_KEY) {
       throw new Error("RESEND_API_KEY absente");
     }
 
-    const payload = await request.json();
     const eventData = payload.data || payload;
     const emailId = eventData.email_id || eventData.id;
 
@@ -759,4 +747,57 @@ export async function POST(request) {
       { status: 500 },
     );
   }
+}
+
+export async function POST(request) {
+  const url = new URL(request.url);
+
+  const suppliedSecret =
+    request.headers.get("x-z-webhook-secret") || url.searchParams.get("secret");
+
+  if (
+    !process.env.Z_IMPORT_SECRET ||
+    suppliedSecret !== process.env.Z_IMPORT_SECRET
+  ) {
+    return Response.json({ error: "Non autorisé" }, { status: 401 });
+  }
+
+  let payload;
+
+  try {
+    payload = await request.json();
+  } catch {
+    return Response.json({ error: "Requête invalide" }, { status: 400 });
+  }
+
+  after(async () => {
+    try {
+      const result = await processIncomingEmail({ url, payload });
+
+      if (!result.ok) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "Traitement différé du courriel échoué",
+            status: result.status,
+            details: await result.text(),
+          }),
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Erreur inattendue pendant le traitement différé du courriel",
+        error,
+      );
+    }
+  });
+
+  return Response.json(
+    {
+      ok: true,
+      received: true,
+      queued: true,
+    },
+    { status: 202 },
+  );
 }
