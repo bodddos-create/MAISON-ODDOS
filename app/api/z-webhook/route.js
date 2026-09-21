@@ -249,6 +249,37 @@ async function inferRestaurantFromExistingSale(businessDate, incomingTtc) {
       ) || null;
 }
 
+function normalizeBusinessDate(value) {
+  const raw = String(value || "").trim();
+  let year;
+  let month;
+  let day;
+
+  let match = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+
+  if (match) {
+    [, year, month, day] = match;
+  } else {
+    match = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (!match) return "";
+    [, day, month, year] = match;
+  }
+
+  const normalized = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  const parsed = new Date(`${normalized}T00:00:00Z`);
+
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.getUTCFullYear() !== Number(year) ||
+    parsed.getUTCMonth() + 1 !== Number(month) ||
+    parsed.getUTCDate() !== Number(day)
+  ) {
+    return "";
+  }
+
+  return normalized;
+}
+
 async function saveZReport({ restaurant, filename, documentPath, analysis }) {
   const result = analysis?.result;
 
@@ -256,7 +287,7 @@ async function saveZReport({ restaurant, filename, documentPath, analysis }) {
     throw new Error("Résultat de l’analyse IA absent");
   }
 
-  const businessDate = String(result.date || "").trim();
+  const businessDate = normalizeBusinessDate(result.date);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
     return {
