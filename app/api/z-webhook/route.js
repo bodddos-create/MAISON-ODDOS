@@ -112,6 +112,37 @@ async function supabaseRequest(path, options = {}) {
   return body;
 }
 
+async function upsertZImport({
+  emailId,
+  attachmentId,
+  filename,
+  status,
+  reason = null,
+  analysis = null,
+  dailySaleId = null,
+  documentPath = null,
+}) {
+  if (!emailId || !attachmentId || !filename) return;
+
+  await supabaseRequest("z_imports?on_conflict=email_id,attachment_id", {
+    method: "POST",
+    headers: {
+      Prefer: "resolution=merge-duplicates,return=minimal",
+    },
+    body: JSON.stringify({
+      email_id: emailId,
+      attachment_id: attachmentId,
+      filename,
+      status,
+      reason,
+      analysis,
+      daily_sale_id: dailySaleId,
+      document_path: documentPath,
+      updated_at: new Date().toISOString(),
+    }),
+  });
+}
+
 async function storeZDocument({ emailId, attachmentId, filename, buffer }) {
   const supabaseUrl = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
   const secretKey = process.env.SUPABASE_SECRET_KEY;
@@ -560,13 +591,19 @@ async function saveHistoricalZ({
 }
 
 async function processIncomingEmail({ url, payload }) {
+  let emailId = null;
+  let attachmentId = null;
+  let filename = null;
+  let documentPath = null;
+  let analysis = null;
+
   try {
     if (!process.env.RESEND_API_KEY) {
       throw new Error("RESEND_API_KEY absente");
     }
 
     const eventData = payload.data || payload;
-    const emailId = eventData.email_id || eventData.id;
+    emailId = eventData.email_id || eventData.id;
 
     if (!emailId) {
       throw new Error("Identifiant du courriel absent");
@@ -632,7 +669,7 @@ async function processIncomingEmail({ url, payload }) {
       });
     }
 
-    const attachmentId = attachment.id;
+    attachmentId = attachment.id;
 
     if (!attachmentId) {
       throw new Error("Identifiant de la pièce jointe absent");
@@ -658,15 +695,22 @@ async function processIncomingEmail({ url, payload }) {
 
     const pdfBuffer = await fileResponse.arrayBuffer();
 
-    const filename = attachment.filename || attachment.name || "rapport-z.pdf";
+    filename = attachment.filename || attachment.name || "rapport-z.pdf";
     if (pdfBuffer.byteLength > 10 * 1024 * 1024) {
       throw new Error("PDF trop volumineux (10 Mo maximum)");
     }
-    const documentPath = await storeZDocument({
+    documentPath = await storeZDocument({
       emailId,
       attachmentId,
       filename,
       buffer: pdfBuffer,
+    });
+    await upsertZImport({
+      emailId,
+      attachmentId,
+      filename,
+      status: "processing",
+      documentPath,
     });
     const historicalMarker = clean(
       [email.subject, eventData.subject, filename].filter(Boolean).join(" "),
@@ -761,8 +805,6 @@ async function processIncomingEmail({ url, payload }) {
       throw new Error(`Analyse IA ${status}: ${details}`);
     }
 
-    let analysis;
-
     try {
       analysis = JSON.parse(scanText);
     } catch {
@@ -783,6 +825,20 @@ async function processIncomingEmail({ url, payload }) {
           documentPath,
           analysis,
         });
+
+    await upsertZImport({
+      emailId,
+      attachmentId,
+      filename,
+      status:
+        persistence?.saved || persistence?.already_validated
+          ? "saved"
+          : "review",
+      reason: persistence?.reason || null,
+      analysis,
+      dailySaleId: persistence?.daily_sale_id || null,
+      documentPath,
+    });
 
     console.log(
       JSON.stringify({
@@ -807,6 +863,20 @@ async function processIncomingEmail({ url, payload }) {
     });
   } catch (error) {
     console.error("z-webhook", error);
+
+    try {
+      await upsertZImport({
+        emailId,
+        attachmentId,
+        filename,
+        status: "error",
+        reason: String(error?.message || error),
+        analysis,
+        documentPath,
+      });
+    } catch (journalError) {
+      console.error("z-webhook journal", journalError);
+    }
 
     return Response.json(
       {
