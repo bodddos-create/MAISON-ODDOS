@@ -79,7 +79,7 @@ export default function Factures() {
       sb
         .from("invoice_imports")
         .select(
-          "id,filename,sender,subject,status,reason,analysis,document_path,created_at",
+          "id,email_id,attachment_id,filename,sender,subject,status,reason,analysis,document_path,created_at",
         )
         .in("status", ["review", "error"])
         .order("created_at", { ascending: false })
@@ -171,6 +171,40 @@ export default function Factures() {
       due_date: x.due_date || "",
     });
   }
+  function openImport(item) {
+    const result = item.analysis?.result || {};
+    const restaurantName = String(result.restaurant || "").toLocaleLowerCase(
+      "fr-FR",
+    );
+    const establishment = ests.find((x) =>
+      restaurantName.includes(String(x.name || "").toLocaleLowerCase("fr-FR")),
+    );
+
+    setMsg("");
+    setEdit({
+      id: null,
+      source_import_id: item.id,
+      source_email_id: item.email_id || null,
+      source_attachment_id: item.attachment_id || null,
+      document_path: item.document_path || null,
+      vat_lines: Array.isArray(result.vatLines) ? result.vatLines : [],
+      document_type:
+        result.documentType === "credit_note" ? "credit_note" : "invoice",
+      establishment_id: establishment?.id || ests[0]?.id || "",
+      invoice_date: /^\d{4}-\d{2}-\d{2}$/.test(result.date)
+        ? result.date
+        : "",
+      supplier: String(result.supplier || ""),
+      category: cats.includes(result.category) ? result.category : cats[0],
+      invoice_number: String(result.number || ""),
+      amount_ht: String(result.ht ?? ""),
+      vat_amount: String(result.vat ?? ""),
+      due_date: /^\d{4}-\d{2}-\d{2}$/.test(result.dueDate)
+        ? result.dueDate
+        : "",
+      paid: false,
+    });
+  }
   async function save(e) {
     e.preventDefault();
     setBusy(true);
@@ -187,13 +221,132 @@ export default function Factures() {
       paid: !!edit.paid,
       document_type: edit.document_type || "invoice",
     };
-    const { error } = await sb
-      .from("supplier_invoices")
-      .update(payload)
-      .eq("id", edit.id);
+    if (edit.source_import_id) {
+      let invoiceId = null;
+      let inserted = false;
+
+      if (payload.invoice_number) {
+        const { data: duplicates, error: duplicateError } = await sb
+          .from("supplier_invoices")
+          .select("id")
+          .eq("establishment_id", payload.establishment_id)
+          .eq("supplier", payload.supplier)
+          .eq("invoice_number", payload.invoice_number)
+          .eq("document_type", payload.document_type)
+          .limit(1);
+
+        if (duplicateError) {
+          setBusy(false);
+          return setMsg("Erreur : " + duplicateError.message);
+        }
+
+        invoiceId = duplicates?.[0]?.id || null;
+      }
+
+      const validatedPayload = {
+        ...payload,
+        document_path: edit.document_path || null,
+        scan_status: "validated",
+        source_email_id: edit.source_email_id || null,
+        source_attachment_id: edit.source_attachment_id || null,
+      };
+
+      if (invoiceId) {
+        const { error } = await sb
+          .from("supplier_invoices")
+          .update(validatedPayload)
+          .eq("id", invoiceId);
+        if (error) {
+          setBusy(false);
+          return setMsg("Erreur : " + error.message);
+        }
+      } else {
+        const { data, error } = await sb
+          .from("supplier_invoices")
+          .insert({ ...validatedPayload, created_by: user.id })
+          .select("id")
+          .single();
+        if (error) {
+          setBusy(false);
+          return setMsg("Erreur : " + error.message);
+        }
+        invoiceId = data.id;
+        inserted = true;
+      }
+
+      const vatLines = (edit.vat_lines || [])
+        .map((line) => ({
+          invoice_id: invoiceId,
+          vat_rate: Number(line.vat_rate || 0),
+          amount_ht: Number(line.amount_ht || 0),
+          vat_amount: Number(line.vat_amount || 0),
+          amount_ttc: Number(line.amount_ttc || 0),
+        }))
+        .filter(
+          (line) =>
+            line.amount_ht >= 0 &&
+            line.vat_amount >= 0 &&
+            line.amount_ttc > 0,
+        );
+      const vatHt = vatLines.reduce((sum, line) => sum + line.amount_ht, 0);
+      const vatAmount = vatLines.reduce(
+        (sum, line) => sum + line.vat_amount,
+        0,
+      );
+
+      if (
+        vatLines.length &&
+        Math.abs(vatHt - payload.amount_ht) <= 0.1 &&
+        Math.abs(vatAmount - payload.vat_amount) <= 0.1
+      ) {
+        await sb
+          .from("supplier_invoice_vat_lines")
+          .delete()
+          .eq("invoice_id", invoiceId);
+        const { error: vatError } = await sb
+          .from("supplier_invoice_vat_lines")
+          .insert(vatLines);
+        if (vatError) {
+          if (inserted) {
+            await sb.from("supplier_invoices").delete().eq("id", invoiceId);
+          }
+          setBusy(false);
+          return setMsg("Erreur TVA : " + vatError.message);
+        }
+      }
+
+      const { error: importError } = await sb
+        .from("invoice_imports")
+        .update({
+          status: "saved",
+          reason: null,
+          invoice_id: invoiceId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", edit.source_import_id);
+
+      if (importError) {
+        if (inserted) {
+          await sb.from("supplier_invoices").delete().eq("id", invoiceId);
+        }
+        setBusy(false);
+        return setMsg("Erreur de validation : " + importError.message);
+      }
+
+      setMsg("✓ Facture contrôlée, validée et enregistrée.");
+    } else {
+      const { error } = await sb
+        .from("supplier_invoices")
+        .update(payload)
+        .eq("id", edit.id);
+      if (error) {
+        setBusy(false);
+        return setMsg("Erreur : " + error.message);
+      }
+      setMsg("✓ Document modifié.");
+    }
+
     setBusy(false);
-    if (error) return setMsg("Erreur : " + error.message);
-    setMsg("✓ Document modifié.");
     setEdit(null);
     await load();
   }
@@ -290,7 +443,11 @@ export default function Factures() {
             className="formCard"
             style={{ maxWidth: 850, marginBottom: 24, scrollMarginTop: 16 }}
           >
-            <h2>Modifier le document</h2>
+            <h2>
+              {edit.source_import_id
+                ? "Contrôler et valider le document"
+                : "Modifier le document"}
+            </h2>
             <form onSubmit={save}>
               <div className="grid">
                 <label>
@@ -428,7 +585,11 @@ export default function Factures() {
                 </p>
               )}
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button disabled={busy}>Enregistrer les modifications</button>
+                <button disabled={busy}>
+                  {edit.source_import_id
+                    ? "Valider et enregistrer"
+                    : "Enregistrer les modifications"}
+                </button>
                 <button type="button" onClick={() => setEdit(null)}>
                   Annuler
                 </button>
@@ -513,6 +674,12 @@ export default function Factures() {
                               disabled={busy}
                             >
                               Envoyer au comptable
+                            </button>
+                            <button
+                              onClick={() => openImport(item)}
+                              disabled={busy}
+                            >
+                              Corriger / Valider
                             </button>
                           </div>
                         ) : (
