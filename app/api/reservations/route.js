@@ -393,3 +393,52 @@ export async function PATCH(request) {
     );
   }
 }
+
+export async function DELETE(request) {
+  try {
+    const config = configuration();
+    const authorization = request.headers.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ")
+      ? authorization.slice(7).trim()
+      : "";
+    if (!token) {
+      return NextResponse.json({ error: "Connexion requise." }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const id = String(body.id || "");
+    if (!/^[0-9a-f-]{36}$/i.test(id)) {
+      return NextResponse.json({ error: "Suppression invalide." }, { status: 400 });
+    }
+
+    const currentRows = await userSupabaseRequest(
+      config,
+      token,
+      `reservations?id=eq.${encodeURIComponent(id)}&select=id&limit=1`,
+    );
+    if (!currentRows?.[0]) {
+      return NextResponse.json({ error: "Réservation introuvable." }, { status: 404 });
+    }
+
+    const deletedRows = await userSupabaseRequest(
+      config,
+      token,
+      `reservations?id=eq.${encodeURIComponent(id)}`,
+      {
+        method: "DELETE",
+        headers: { Prefer: "return=representation" },
+      },
+    );
+    if (!deletedRows?.[0]) {
+      return NextResponse.json({ error: "Suppression refusée." }, { status: 403 });
+    }
+
+    return NextResponse.json({ ok: true, id });
+  } catch (error) {
+    console.error("reservation DELETE", error);
+    return NextResponse.json(
+      { error: "Impossible de supprimer cette réservation." },
+      { status: 500 },
+    );
+  }
+}
