@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { extractText, getDocumentProxy } from "unpdf";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -6,6 +7,51 @@ export const maxDuration = 300;
 const MODEL = "openai/gpt-5.6-sol";
 const FALLBACK_MODELS = ["openai/gpt-5.4"];
 const GATEWAY_TIMEOUT_MS = 75_000;
+const PDF_TEXT_TIMEOUT_MS = 10_000;
+const MAX_PDF_PAGES = 40;
+const MAX_EXTRACTED_TEXT_LENGTH = 100_000;
+
+async function extractPdfText(buffer) {
+  let pdf;
+
+  try {
+    pdf = await getDocumentProxy(new Uint8Array(buffer), {
+      maxImageSize: 16_777_216,
+    });
+
+    if (pdf.numPages > MAX_PDF_PAGES) {
+      throw new Error(`PDF trop long (${pdf.numPages} pages)`);
+    }
+
+    const extraction = await Promise.race([
+      extractText(pdf, { mergePages: true }),
+      new Promise((_, reject) =>
+        setTimeout(
+          () => reject(new Error("Délai d’extraction du texte PDF dépassé")),
+          PDF_TEXT_TIMEOUT_MS,
+        ),
+      ),
+    ]);
+    const text = String(extraction?.text || "").trim();
+
+    return text.length >= 40
+      ? text.slice(0, MAX_EXTRACTED_TEXT_LENGTH)
+      : "";
+  } catch (error) {
+    console.warn(
+      JSON.stringify({
+        level: "warning",
+        message: "Extraction locale du texte PDF indisponible",
+        error: String(error?.message || error),
+      }),
+    );
+    return "";
+  } finally {
+    try {
+      await pdf?.destroy?.();
+    } catch {}
+  }
+}
 
 const CATEGORIES = [
   "Alimentaire",
@@ -68,7 +114,8 @@ export async function POST(req) {
       );
     }
 
-    const b64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+    const fileBuffer = await file.arrayBuffer();
+    const b64 = Buffer.from(fileBuffer).toString("base64");
     const schema =
       type === "invoice"
         ? invoiceSchema
@@ -82,12 +129,31 @@ export async function POST(req) {
           ? zHistoryPrompt
           : zPrompt;
 
-    const documentInput = isPdf
-      ? {
-          type: "input_file",
+    const pdfText = isPdf ? await extractPdfText(fileBuffer) : "";
+
+    if (isPdf) {
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Préparation du PDF pour analyse",
           filename: file.name || "document.pdf",
-          file_data: `data:application/pdf;base64,${b64}`,
-        }
+          extractedTextCharacters: pdfText.length,
+          mode: pdfText ? "text" : "file",
+        }),
+      );
+    }
+
+    const documentInput = isPdf
+      ? pdfText
+        ? {
+            type: "input_text",
+            text: `Contenu texte extrait du PDF :\n\n${pdfText}`,
+          }
+        : {
+            type: "input_file",
+            filename: file.name || "document.pdf",
+            file_data: `data:application/pdf;base64,${b64}`,
+          }
       : {
           type: "input_image",
           image_url: `data:${mediaType};base64,${b64}`,
