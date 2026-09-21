@@ -448,25 +448,42 @@ export default function Home() {
         ? hours
         : hours.filter((x) => x.establishment_id === selectedEst);
   const totals = useMemo(() => {
-    const ca = fs.reduce(
+    const periodSales = fs.filter((x) =>
+        String(x.business_date || "").startsWith(chartMonth),
+      ),
+      periodInvoices = fi.filter((x) =>
+        String(x.invoice_date || "").startsWith(chartMonth),
+      ),
+      chargeApplies = (x) => {
+        const start = String(x.month || "").slice(0, 7);
+        const end = String(x.end_month || "").slice(0, 7);
+        return x.recurring
+          ? start <= chartMonth && (!end || end >= chartMonth)
+          : start === chartMonth;
+      },
+      periodCharges = fc.filter(chargeApplies),
+      ca = periodSales.reduce(
         (a, x) =>
           a + Number(x.lunch_sales_ht || 0) + Number(x.dinner_sales_ht || 0),
         0,
       ),
-      covers = fs.reduce(
+      covers = periodSales.reduce(
         (a, x) =>
           a + Number(x.lunch_covers || 0) + Number(x.dinner_covers || 0),
         0,
       ),
-      personnel = fs.reduce((a, x) => a + Number(x.staff_cost || 0), 0),
-      achats = fi.reduce(
+      personnel = periodSales.reduce(
+        (a, x) => a + Number(x.staff_cost || 0),
+        0,
+      ),
+      achats = periodInvoices.reduce(
         (a, x) =>
           a +
           (x.document_type === "credit_note" ? -1 : 1) *
             Number(x.amount_ht || 0),
         0,
       ),
-      fixes = fc.reduce((a, x) => a + Number(x.amount || 0), 0),
+      fixes = periodCharges.reduce((a, x) => a + Number(x.amount || 0), 0),
       ym = chartMonth,
       ids = selectedEst === "all" ? ests.map((e) => e.id) : [selectedEst],
       habitualOpen = (id, date) => {
