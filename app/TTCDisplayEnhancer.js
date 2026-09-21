@@ -377,6 +377,22 @@ export default function TTCDisplayEnhancer() {
         setCard("Personnel", money(personnelDay));
         setCard("Personnel moyen / jour (22j)", money(personnelDay));
         setCard("Personnel moyen / jour", money(personnelDay));
+        const personnelCard = [...main.querySelectorAll(".card")].find((card) =>
+          ["Personnel", "Personnel moyen / jour", "Personnel moyen / jour (22j)"].includes(
+            card.querySelector("span")?.textContent?.trim(),
+          ),
+        );
+        if (personnelCard) {
+          let monthly = personnelCard.querySelector("[data-personnel-monthly]");
+          if (!monthly) {
+            monthly = document.createElement("div");
+            monthly.dataset.personnelMonthly = "true";
+            monthly.style.cssText =
+              "margin-top:8px;font-size:13px;font-weight:800;padding:5px 9px;border-radius:8px;display:inline-block;color:#2f6b3a;background:#e8f3e8";
+            personnelCard.appendChild(monthly);
+          }
+          monthly.textContent = `Mensuel chargé : ${money(payroll)}`;
+        }
         setCard("Charges fixes", money(fixedTotal));
         const addRate = (title, key, ttcValue, htValue) => {
           const card = [...main.querySelectorAll(".card")].find(
