@@ -266,7 +266,6 @@ export default function ReservationsAdmin() {
         <div><div className="brand">MAISON ODDOS</div><h1>Réservations</h1></div>
         <div className="headerActions">
           <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
-          <a href="/"><button>← Pilotage</button></a>
         </div>
       </header>
       <section>
