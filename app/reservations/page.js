@@ -81,10 +81,32 @@ export default function ReservationsAdmin() {
 
   async function changeStatus(id, status) {
     setMessage("");
-    const { error } = await sb.from("reservations").update({ status, updated_at: new Date().toISOString() }).eq("id", id);
-    if (error) return setMessage(`Erreur : ${error.message}`);
-    setReservations((items) => items.map((item) => (item.id === id ? { ...item, status } : item)));
-    setMessage("Réservation mise à jour.");
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.access_token) return setMessage("Votre session a expiré. Reconnectez-vous.");
+    try {
+      const response = await fetch("/api/reservations", {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id, status }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error);
+      setReservations((items) => items.map((item) => (item.id === id ? body.reservation : item)));
+      if (status !== "confirmed") {
+        setMessage("Réservation mise à jour.");
+      } else if (body.email_sent) {
+        setMessage("Réservation confirmée et courriel envoyé au client.");
+      } else if (body.email_reason === "no_email") {
+        setMessage("Réservation confirmée, mais le client n’a pas renseigné d’adresse e-mail.");
+      } else {
+        setMessage("Réservation confirmée, mais le courriel n’a pas pu être envoyé. Vous pouvez cliquer à nouveau sur Confirmer.");
+      }
+    } catch (error) {
+      setMessage(`Erreur : ${error.message || "mise à jour impossible"}`);
+    }
   }
 
   function changeSetting(field, value) {

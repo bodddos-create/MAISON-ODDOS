@@ -5,6 +5,15 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const publishableKey =
+  "sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE";
+const allowedStatuses = new Set([
+  "pending",
+  "confirmed",
+  "cancelled",
+  "no_show",
+  "completed",
+]);
 
 function configuration() {
   const supabaseUrl = String(process.env.SUPABASE_URL || "").replace(/\/$/, "");
@@ -19,6 +28,23 @@ async function supabaseRequest(config, path, options = {}) {
     headers: {
       apikey: config.secretKey,
       Authorization: `Bearer ${config.secretKey}`,
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+    cache: "no-store",
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : null;
+  if (!response.ok) throw new Error(`Supabase ${response.status}: ${text}`);
+  return body;
+}
+
+async function userSupabaseRequest(config, token, path, options = {}) {
+  const response = await fetch(`${config.supabaseUrl}/rest/v1/${path}`, {
+    ...options,
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
       ...(options.headers || {}),
     },
@@ -72,6 +98,56 @@ async function sendAcknowledgement(config, reservation, restaurantName) {
     cache: "no-store",
   });
   if (!response.ok) console.error("reservation email", response.status, await response.text());
+}
+
+async function sendConfirmation(config, reservation, restaurantName) {
+  if (!config.resendKey || !reservation.email) {
+    return { sent: false, reason: reservation.email ? "configuration" : "no_email" };
+  }
+  const formattedDate = new Date(
+    `${reservation.reservation_date}T12:00:00Z`,
+  ).toLocaleDateString("fr-FR", {
+    timeZone: "Europe/Paris",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.resendKey}`,
+      "Content-Type": "application/json",
+      "Idempotency-Key": `reservation-confirmed-${reservation.id}`,
+    },
+    body: JSON.stringify({
+      from:
+        process.env.RESERVATION_FROM ||
+        "Maison Oddos <reservations@reception.oddos.eu>",
+      to: [reservation.email],
+      subject: `Réservation confirmée — ${restaurantName}`,
+      text: `Bonjour ${reservation.customer_name},
+
+Votre réservation est confirmée.
+
+Restaurant : ${restaurantName}
+Date : ${formattedDate}
+Heure : ${String(reservation.reservation_time).slice(0, 5)}
+Nombre de personnes : ${reservation.party_size}
+Référence : ${reservation.confirmation_code}
+
+Nous avons hâte de vous accueillir.
+
+À très bientôt,
+Maison Oddos`,
+    }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    console.error("reservation confirmation email", response.status, await response.text());
+    return { sent: false, reason: "send_error" };
+  }
+  return { sent: true };
 }
 
 export async function GET() {
@@ -229,6 +305,79 @@ export async function POST(request) {
     console.error("reservation POST", error);
     return NextResponse.json(
       { error: "Impossible d’enregistrer la demande pour le moment." },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(request) {
+  try {
+    const config = configuration();
+    const authorization = request.headers.get("authorization") || "";
+    const token = authorization.startsWith("Bearer ")
+      ? authorization.slice(7).trim()
+      : "";
+    if (!token) {
+      return NextResponse.json({ error: "Connexion requise." }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const id = String(body.id || "");
+    const status = String(body.status || "");
+    if (!/^[0-9a-f-]{36}$/i.test(id) || !allowedStatuses.has(status)) {
+      return NextResponse.json({ error: "Mise à jour invalide." }, { status: 400 });
+    }
+
+    const currentRows = await userSupabaseRequest(
+      config,
+      token,
+      `reservations?id=eq.${encodeURIComponent(id)}&select=*&limit=1`,
+    );
+    if (!currentRows?.[0]) {
+      return NextResponse.json({ error: "Réservation introuvable." }, { status: 404 });
+    }
+
+    const updatedRows = await userSupabaseRequest(
+      config,
+      token,
+      `reservations?id=eq.${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({
+          status,
+          updated_at: new Date().toISOString(),
+        }),
+      },
+    );
+    const reservation = updatedRows?.[0];
+    if (!reservation) {
+      return NextResponse.json({ error: "Mise à jour refusée." }, { status: 403 });
+    }
+
+    let email = { sent: false, reason: "not_required" };
+    if (status === "confirmed") {
+      const establishments = await supabaseRequest(
+        config,
+        `establishments?id=eq.${encodeURIComponent(reservation.establishment_id)}&select=name&limit=1`,
+      );
+      email = await sendConfirmation(
+        config,
+        reservation,
+        establishments?.[0]?.name || "Maison Oddos",
+      );
+    }
+
+    return NextResponse.json({
+      ok: true,
+      reservation,
+      email_sent: email.sent,
+      email_reason: email.reason || null,
+    });
+  } catch (error) {
+    console.error("reservation PATCH", error);
+    return NextResponse.json(
+      { error: "Impossible de mettre à jour cette réservation." },
       { status: 500 },
     );
   }
