@@ -77,14 +77,31 @@ async function sendAcknowledgement(config, reservation, restaurantName) {
 export async function GET() {
   try {
     const config = configuration();
-    const [establishments, services] = await Promise.all([
+    const today = parisToday();
+    const [allEstablishments, services, settings, exceptions] = await Promise.all([
       supabaseRequest(config, "establishments?active=eq.true&select=id,name&order=name.asc"),
       supabaseRequest(
         config,
         "reservation_services?active=eq.true&select=id,establishment_id,weekday,label,start_time,end_time,slot_interval,max_party_size&order=weekday.asc,start_time.asc",
       ),
+      supabaseRequest(
+        config,
+        "reservation_settings?select=establishment_id,online_enabled,booking_days_ahead",
+      ),
+      supabaseRequest(
+        config,
+        `reservation_exceptions?exception_date=gte.${today}&is_closed=eq.true&select=establishment_id,exception_date,note&order=exception_date.asc`,
+      ),
     ]);
-    return NextResponse.json({ establishments, services });
+    const enabledIds = new Set(
+      (settings || [])
+        .filter((item) => item.online_enabled)
+        .map((item) => item.establishment_id),
+    );
+    const establishments = (allEstablishments || []).filter((item) =>
+      enabledIds.has(item.id),
+    );
+    return NextResponse.json({ establishments, services, settings, exceptions });
   } catch (error) {
     console.error("reservation GET", error);
     return NextResponse.json(
@@ -127,17 +144,8 @@ export async function POST(request) {
     }
 
     const today = parisToday();
-    const maxDate = new Date(`${today}T12:00:00Z`);
-    maxDate.setUTCDate(maxDate.getUTCDate() + 180);
-    if (reservationDate < today || reservationDate > maxDate.toISOString().slice(0, 10)) {
-      return NextResponse.json(
-        { error: "Cette date n’est pas disponible à la réservation." },
-        { status: 400 },
-      );
-    }
-
     const weekday = new Date(`${reservationDate}T12:00:00Z`).getUTCDay();
-    const [establishments, services] = await Promise.all([
+    const [establishments, services, settings, exceptions] = await Promise.all([
       supabaseRequest(
         config,
         `establishments?id=eq.${encodeURIComponent(establishmentId)}&active=eq.true&select=id,name&limit=1`,
@@ -146,10 +154,33 @@ export async function POST(request) {
         config,
         `reservation_services?establishment_id=eq.${encodeURIComponent(establishmentId)}&weekday=eq.${weekday}&active=eq.true&select=*`,
       ),
+      supabaseRequest(
+        config,
+        `reservation_settings?establishment_id=eq.${encodeURIComponent(establishmentId)}&select=online_enabled,booking_days_ahead&limit=1`,
+      ),
+      supabaseRequest(
+        config,
+        `reservation_exceptions?establishment_id=eq.${encodeURIComponent(establishmentId)}&exception_date=eq.${reservationDate}&is_closed=eq.true&select=id&limit=1`,
+      ),
     ]);
     const establishment = establishments?.[0];
     if (!establishment) {
       return NextResponse.json({ error: "Restaurant introuvable." }, { status: 404 });
+    }
+    const setting = settings?.[0];
+    if (!setting?.online_enabled || exceptions?.length) {
+      return NextResponse.json(
+        { error: "Le restaurant est fermé aux réservations pour cette date." },
+        { status: 400 },
+      );
+    }
+    const maxDate = new Date(`${today}T12:00:00Z`);
+    maxDate.setUTCDate(maxDate.getUTCDate() + Number(setting.booking_days_ahead || 180));
+    if (reservationDate < today || reservationDate > maxDate.toISOString().slice(0, 10)) {
+      return NextResponse.json(
+        { error: "Cette date n’est pas disponible à la réservation." },
+        { status: 400 },
+      );
     }
 
     const selectedMinutes = minutes(reservationTime);

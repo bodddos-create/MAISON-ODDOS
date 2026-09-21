@@ -12,28 +12,35 @@ const timeToMinutes = (value) => {
   return hours * 60 + minutes;
 };
 const timeLabel = (value) => String(value).slice(0, 5).replace(":", "h");
-const nextAvailableDate = (services, establishmentId) => {
+const nextAvailableDate = (services, exceptions, establishmentId, daysAhead = 180) => {
   const start = new Date(`${today()}T12:00:00`);
-  for (let offset = 0; offset < 14; offset += 1) {
+  const closedDates = new Set(
+    exceptions
+      .filter((item) => item.establishment_id === establishmentId)
+      .map((item) => item.exception_date),
+  );
+  for (let offset = 0; offset <= daysAhead; offset += 1) {
     const candidate = new Date(start);
     candidate.setDate(start.getDate() + offset);
+    const local = new Date(candidate);
+    local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+    const date = local.toISOString().slice(0, 10);
     if (
+      !closedDates.has(date) &&
       services.some(
         (service) =>
           service.establishment_id === establishmentId &&
           Number(service.weekday) === candidate.getDay(),
       )
     ) {
-      const local = new Date(candidate);
-      local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
-      return local.toISOString().slice(0, 10);
+      return date;
     }
   }
   return today();
 };
 
 export default function ReservationPage() {
-  const [data, setData] = useState({ establishments: [], services: [] });
+  const [data, setData] = useState({ establishments: [], services: [], settings: [], exceptions: [] });
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -62,7 +69,9 @@ export default function ReservationPage() {
           establishment_id: current.establishment_id || firstEstablishment,
           reservation_date: nextAvailableDate(
             body.services || [],
+            body.exceptions || [],
             current.establishment_id || firstEstablishment,
+            body.settings?.find((item) => item.establishment_id === (current.establishment_id || firstEstablishment))?.booking_days_ahead || 180,
           ),
         }));
       })
@@ -72,13 +81,43 @@ export default function ReservationPage() {
 
   const services = useMemo(() => {
     if (!form.reservation_date) return [];
+    if (data.exceptions.some(
+      (item) => item.establishment_id === form.establishment_id && item.exception_date === form.reservation_date,
+    )) return [];
     const weekday = new Date(`${form.reservation_date}T12:00:00`).getDay();
     return data.services.filter(
       (service) =>
         service.establishment_id === form.establishment_id &&
         Number(service.weekday) === weekday,
     );
-  }, [data.services, form.establishment_id, form.reservation_date]);
+  }, [data.services, data.exceptions, form.establishment_id, form.reservation_date]);
+
+  const maxDate = useMemo(() => {
+    const days = Number(data.settings.find(
+      (item) => item.establishment_id === form.establishment_id,
+    )?.booking_days_ahead || 180);
+    const value = new Date(`${today()}T12:00:00`);
+    value.setDate(value.getDate() + days);
+    value.setMinutes(value.getMinutes() - value.getTimezoneOffset());
+    return value.toISOString().slice(0, 10);
+  }, [data.settings, form.establishment_id]);
+
+  function selectRestaurant(establishmentId) {
+    const days = Number(data.settings.find(
+      (item) => item.establishment_id === establishmentId,
+    )?.booking_days_ahead || 180);
+    setForm((current) => ({
+      ...current,
+      establishment_id: establishmentId,
+      reservation_date: nextAvailableDate(
+        data.services,
+        data.exceptions,
+        establishmentId,
+        days,
+      ),
+      reservation_time: "",
+    }));
+  }
 
   const slots = useMemo(() => {
     const values = [];
@@ -172,7 +211,7 @@ export default function ReservationPage() {
             <form onSubmit={submit} className="bookingForm">
               <label>
                 Restaurant
-                <select required value={form.establishment_id} onChange={(event) => setForm({ ...form, establishment_id: event.target.value })}>
+                <select required value={form.establishment_id} onChange={(event) => selectRestaurant(event.target.value)}>
                   {data.establishments.map((establishment) => (
                     <option key={establishment.id} value={establishment.id}>{establishment.name}</option>
                   ))}
@@ -180,7 +219,7 @@ export default function ReservationPage() {
               </label>
               <label>
                 Date
-                <input required type="date" min={today()} value={form.reservation_date} onChange={(event) => setForm({ ...form, reservation_date: event.target.value })} />
+                <input required type="date" min={today()} max={maxDate} value={form.reservation_date} onChange={(event) => setForm({ ...form, reservation_date: event.target.value })} />
               </label>
               <label>
                 Horaire
