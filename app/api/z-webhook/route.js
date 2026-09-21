@@ -614,10 +614,22 @@ export async function POST(request) {
     const historicalMarker = clean(
       [email.subject, eventData.subject, filename].filter(Boolean).join(" "),
     );
+    const normalizedHistoricalMarker = historicalMarker.replace(
+      /[^a-z0-9]+/g,
+      " ",
+    );
+    const reportDates = [
+      ...normalizedHistoricalMarker.matchAll(
+        /\b(?:20)?(\d{2}) (\d{2}) (\d{2})\b/g,
+      ),
+    ].map((match) => `${match[1]}-${match[2]}-${match[3]}`);
+    const hasDistinctDateRange =
+      reportDates.length >= 2 && reportDates[0] !== reportDates.at(-1);
     const isHistorical =
-      /\b(historique|annuel|annuelle|general|generale|recap|recapitulatif|synthese|archive)\b/.test(
+      (/\b(historique|annuel|annuelle|general|generale|recap|recapitulatif|synthese|archive)\b/.test(
         historicalMarker,
-      ) && /\b20\d{2}\b/.test(historicalMarker);
+      ) && /\b20\d{2}\b/.test(historicalMarker)) ||
+      hasDistinctDateRange;
 
     const formData = new FormData();
 
