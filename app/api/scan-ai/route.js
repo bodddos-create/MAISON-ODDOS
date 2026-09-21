@@ -4,6 +4,8 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 const MODEL = "openai/gpt-5.6-sol";
+const FALLBACK_MODELS = ["openai/gpt-5.4"];
+const GATEWAY_TIMEOUT_MS = 75_000;
 
 const CATEGORIES = [
   "Alimentaire",
@@ -93,6 +95,11 @@ export async function POST(req) {
 
     const body = {
       model: MODEL,
+      providerOptions: {
+        gateway: {
+          models: FALLBACK_MODELS,
+        },
+      },
       input: [
         {
           role: "system",
@@ -136,6 +143,7 @@ export async function POST(req) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GATEWAY_TIMEOUT_MS),
     });
 
     const responseText = await response.text();
@@ -172,7 +180,7 @@ export async function POST(req) {
     return NextResponse.json({
       ok: true,
       result: normalize(parsed, type),
-      model: MODEL,
+      model: data.model || MODEL,
     });
   } catch (error) {
     console.error("scan-ai", error);
