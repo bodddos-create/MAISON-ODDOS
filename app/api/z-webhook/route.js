@@ -167,21 +167,62 @@ function calculateConfidence(result) {
   );
 }
 
+const RESTAURANTS = [
+  {
+    name: "Villa Valleyre",
+    establishment_id: "8395bf22-99cb-4a7b-9096-ca734d583d83",
+  },
+  {
+    name: "La Maison du Parc",
+    establishment_id: "55c6e880-aa0c-40d6-9065-b5315b1a602a",
+  },
+];
+
+async function inferRestaurantFromExistingSale(businessDate, incomingTtc) {
+  if (!(incomingTtc > 0)) return null;
+
+  const rows =
+    (await supabaseRequest(
+      `daily_sales?business_date=eq.${encodeURIComponent(
+        businessDate,
+      )}&select=id,establishment_id&limit=3`,
+      { method: "GET" },
+    )) || [];
+
+  if (rows.length !== 1) return null;
+
+  const existing = rows[0];
+  const knownRestaurant = RESTAURANTS.find(
+    (item) => item.establishment_id === existing.establishment_id,
+  );
+
+  if (!knownRestaurant) return null;
+
+  const vatLines =
+    (await supabaseRequest(
+      `daily_sale_vat_lines?daily_sale_id=eq.${encodeURIComponent(
+        existing.id,
+      )}&select=amount_ttc`,
+      { method: "GET" },
+    )) || [];
+  const existingTtc = roundMoney(
+    vatLines.reduce((sum, line) => sum + toNumber(line.amount_ttc), 0),
+  );
+  const isSameReport =
+    existingTtc > 0 && Math.abs(existingTtc - incomingTtc) <= 0.02;
+
+  return isSameReport
+    ? knownRestaurant
+    : RESTAURANTS.find(
+        (item) => item.establishment_id !== existing.establishment_id,
+      ) || null;
+}
+
 async function saveZReport({ restaurant, filename, documentPath, analysis }) {
   const result = analysis?.result;
 
   if (!result) {
     throw new Error("Résultat de l’analyse IA absent");
-  }
-
-  const resolvedRestaurant = restaurant || detectRestaurant(result.restaurant);
-
-  if (!resolvedRestaurant) {
-    return {
-      saved: false,
-      needs_review: true,
-      reason: "Restaurant non identifié",
-    };
   }
 
   const businessDate = String(result.date || "").trim();
@@ -191,6 +232,34 @@ async function saveZReport({ restaurant, filename, documentPath, analysis }) {
       saved: false,
       needs_review: true,
       reason: "Date du Z absente ou invalide",
+    };
+  }
+
+  let resolvedRestaurant = restaurant || detectRestaurant(result.restaurant);
+
+  if (!resolvedRestaurant) {
+    resolvedRestaurant = await inferRestaurantFromExistingSale(
+      businessDate,
+      roundMoney(toNumber(result.ca)),
+    );
+
+    if (resolvedRestaurant) {
+      console.warn(
+        JSON.stringify({
+          level: "warning",
+          message: "Restaurant déduit par comparaison des Z de la journée",
+          businessDate,
+          restaurant: resolvedRestaurant.name,
+        }),
+      );
+    }
+  }
+
+  if (!resolvedRestaurant) {
+    return {
+      saved: false,
+      needs_review: true,
+      reason: "Restaurant non identifié",
     };
   }
 
