@@ -625,11 +625,25 @@ export async function POST(request) {
     ].map((match) => `${match[1]}-${match[2]}-${match[3]}`);
     const hasDistinctDateRange =
       reportDates.length >= 2 && reportDates[0] !== reportDates.at(-1);
-    const isHistorical =
-      (/\b(historique|annuel|annuelle|general|generale|recap|recapitulatif|synthese|archive)\b/.test(
+    const hasExplicitDateRange = reportDates.length >= 2;
+    const hasHistoricalKeyword =
+      /\b(historique|annuel|annuelle|general|generale|recap|recapitulatif|synthese|archive)\b/.test(
         historicalMarker,
-      ) && /\b20\d{2}\b/.test(historicalMarker)) ||
-      hasDistinctDateRange;
+      ) && /\b20\d{2}\b/.test(historicalMarker);
+    const isHistorical = hasExplicitDateRange
+      ? hasDistinctDateRange
+      : hasHistoricalKeyword;
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Classification du Z",
+        emailId,
+        filename,
+        reportDates,
+        isHistorical,
+      }),
+    );
 
     const formData = new FormData();
 
@@ -677,6 +691,18 @@ export async function POST(request) {
           documentPath,
           analysis,
         });
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Traitement du Z terminé",
+        emailId,
+        filename,
+        historical: isHistorical,
+        saved: persistence?.saved,
+        needsReview: persistence?.needs_review,
+      }),
+    );
 
     return Response.json({
       ok: true,
