@@ -394,6 +394,9 @@ export default function Factures() {
             x.establishment_id === supplierEstablishment),
       )
     : [];
+  const selectedSupplierName =
+    supplierOptions.find(([key]) => key === selectedSupplier)?.[1] || "";
+  const displayedInvoiceRows = selectedSupplier ? supplierSummaryRows : rows;
   const supplierTotalHt = supplierSummaryRows.reduce(
     (total, x) => total + sign(x) * Number(x.amount_ht || 0),
     0,
@@ -799,13 +802,31 @@ export default function Factures() {
                     ? ` · ${supplierCreditCount} avoir${supplierCreditCount > 1 ? "s" : ""} déduit${supplierCreditCount > 1 ? "s" : ""}`
                     : ""}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedSupplier("")}
+                  style={{ marginTop: 12 }}
+                >
+                  Afficher tous les fournisseurs
+                </button>
               </>
             ) : (
               <b>Choisissez un fournisseur pour afficher son total HT.</b>
             )}
           </div>
         </div>
-        <h2>Factures et avoirs fournisseurs</h2>
+        <h2>
+          {selectedSupplier
+            ? `Factures et avoirs · ${selectedSupplierName}`
+            : "Factures et avoirs fournisseurs"}
+        </h2>
+        {selectedSupplier && (
+          <p>
+            {displayedInvoiceRows.length} document
+            {displayedInvoiceRows.length > 1 ? "s" : ""} pour la période et
+            l’établissement sélectionnés.
+          </p>
+        )}
         <div className="table">
           <table>
             <thead>
@@ -822,8 +843,8 @@ export default function Factures() {
               </tr>
             </thead>
             <tbody>
-              {rows.length ? (
-                rows.map((x) => (
+              {displayedInvoiceRows.length ? (
+                displayedInvoiceRows.map((x) => (
                   <tr key={x.id}>
                     <td>{x.invoice_date}</td>
                     <td>
@@ -879,7 +900,11 @@ export default function Factures() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="9">Aucun document.</td>
+                  <td colSpan="9">
+                    {selectedSupplier
+                      ? "Aucun document pour ces filtres."
+                      : "Aucun document."}
+                  </td>
                 </tr>
               )}
             </tbody>
