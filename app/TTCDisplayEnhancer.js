@@ -1,5 +1,6 @@
 "use client";
 import { useEffect } from "react";
+import { usePathname } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 
 const sb = createClient(
@@ -31,7 +32,10 @@ const openDaysInMonth = (est, ym) => {
 };
 
 export default function TTCDisplayEnhancer() {
+  const pathname = usePathname();
+
   useEffect(() => {
+    if (pathname !== "/") return;
     let stopped = false,
       timer;
     const run = async () => {
@@ -98,12 +102,21 @@ export default function TTCDisplayEnhancer() {
         const est = estSelect?.value || "all";
         const monthInput = main.querySelector('input[type="month"]');
         const ym = monthInput?.value || new Date().toISOString().slice(0, 7);
-        const filtered =
-          est === "all" ? rows : rows.filter((x) => x.establishment_id === est);
+        const selectedRows =
+          est === "all"
+            ? rows
+            : rows.filter((x) => x.establishment_id === est);
+        const monthRows = selectedRows.filter((x) =>
+          String(x.business_date || "").startsWith(ym),
+        );
+        const monthInvoices = (invoices || []).filter((x) =>
+          String(x.invoice_date || "").startsWith(ym),
+        );
+        const filtered = monthRows;
         const inv =
           est === "all"
-            ? invoices || []
-            : (invoices || []).filter((x) => x.establishment_id === est);
+            ? monthInvoices
+            : monthInvoices.filter((x) => x.establishment_id === est);
         const emps =
           est === "all"
             ? employees || []
@@ -238,6 +251,7 @@ export default function TTCDisplayEnhancer() {
         setCard("CA moyen / jour TTC", money(avg));
         setCard("Ticket moyen", money(covers ? ca / covers : 0));
         setCard("Ticket moyen TTC", money(covers ? ca / covers : 0));
+        setCard("Couverts", covers.toLocaleString("fr-FR"));
         setCard("Achats", money(achats));
         setCard("Achats TTC", money(achats));
         const purchaseCard = [...main.querySelectorAll(".card")].find(
@@ -451,34 +465,40 @@ export default function TTCDisplayEnhancer() {
           )
             s.textContent += " TTC";
         });
-        [...main.querySelectorAll("th")].forEach((th) => {
-          if (th.textContent === "CA HT") th.textContent = "CA TTC";
-        });
-        const lastHeading = [...main.querySelectorAll("h3")].find(
-          (h) => h.textContent?.trim() === "Dernières journées",
-        );
-        const lastTable = lastHeading?.nextElementSibling;
-        if (
-          lastTable?.tagName === "TABLE" ||
-          lastTable?.querySelector?.("table")
-        ) {
-          const table =
-            lastTable.tagName === "TABLE"
-              ? lastTable
-              : lastTable.querySelector("table");
-          const saleByRow = new Map(
-            filtered.map((s) => [
-              `${String(s.business_date).slice(0, 10)}|${ESTABLISHMENT_NAMES[s.establishment_id] || s.establishment_id}`,
-              s,
-            ]),
+        const updateSalesTable = (headingText) => {
+          const heading = [...main.querySelectorAll("h2, h3")].find(
+            (node) => node.textContent?.trim() === headingText,
           );
-          [...table.querySelectorAll("tbody tr")].forEach((tr) => {
-            const cells = tr.querySelectorAll("td");
-            const rowKey = `${cells[0]?.textContent?.trim() || ""}|${cells[1]?.textContent?.trim() || ""}`;
-            const sale = saleByRow.get(rowKey);
-            if (cells[2] && sale) cells[2].textContent = money(sale.ttc);
-          });
-        }
+          let tableRoot = heading?.nextElementSibling;
+          while (
+            tableRoot &&
+            !tableRoot.matches?.("table") &&
+            !tableRoot.querySelector?.("table")
+          ) {
+            tableRoot = tableRoot.nextElementSibling;
+          }
+          if (tableRoot) {
+            const table = tableRoot.matches?.("table")
+              ? tableRoot
+              : tableRoot.querySelector("table");
+            const amountHeader = table?.querySelector("thead th:nth-child(3)");
+            if (amountHeader) amountHeader.textContent = "CA TTC";
+            const saleByRow = new Map(
+              selectedRows.map((s) => [
+                `${String(s.business_date).slice(0, 10)}|${ESTABLISHMENT_NAMES[s.establishment_id] || s.establishment_id}`,
+                s,
+              ]),
+            );
+            [...table.querySelectorAll("tbody tr")].forEach((tr) => {
+              const cells = tr.querySelectorAll("td");
+              const rowKey = `${cells[0]?.textContent?.trim() || ""}|${cells[1]?.textContent?.trim() || ""}`;
+              const sale = saleByRow.get(rowKey);
+              if (cells[2] && sale) cells[2].textContent = money(sale.ttc);
+            });
+          }
+        };
+        updateSalesTable("Dernières journées");
+        updateSalesTable("Historique des Z");
         [...main.querySelectorAll("small")].forEach((s) => {
           if (s.textContent?.startsWith("Charges = achats + personnel"))
             s.textContent =
@@ -504,6 +524,6 @@ export default function TTCDisplayEnhancer() {
       clearTimeout(timer);
       cleanup?.();
     };
-  }, []);
+  }, [pathname]);
   return null;
 }
