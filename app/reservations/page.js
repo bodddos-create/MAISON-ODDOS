@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const sb = createClient(
@@ -39,10 +39,19 @@ export default function ReservationsAdmin() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState("default");
   const [closure, setClosure] = useState({ exception_date: "", note: "" });
+  const reservationIds = useRef(new Set());
+  const alertsEnabledRef = useRef(false);
+  const audioContextRef = useRef(null);
 
   useEffect(() => {
     sb.auth.getUser().then(({ data }) => setUser(data?.user || null));
+    const enabled = window.localStorage.getItem("reservation-alerts-enabled") === "true";
+    alertsEnabledRef.current = enabled;
+    setAlertsEnabled(enabled);
+    if ("Notification" in window) setNotificationPermission(Notification.permission);
   }, []);
 
   async function load() {
@@ -57,6 +66,7 @@ export default function ReservationsAdmin() {
     const firstError = results.find((result) => result.error)?.error;
     if (firstError) setMessage(`Erreur : ${firstError.message}`);
     setReservations(results[0].data || []);
+    reservationIds.current = new Set((results[0].data || []).map((item) => item.id));
     setEstablishments(results[1].data || []);
     setServices(results[2].data || []);
     setSettings(results[3].data || []);
@@ -73,6 +83,97 @@ export default function ReservationsAdmin() {
     () => Object.fromEntries(establishments.map((item) => [item.id, item.name])),
     [establishments],
   );
+
+  function playReservationSound() {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const context = audioContextRef.current || new AudioContext();
+      audioContextRef.current = context;
+      context.resume();
+      [0, 0.22, 0.44].forEach((delay, index) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        const start = context.currentTime + delay;
+        oscillator.type = "sine";
+        oscillator.frequency.value = [659, 784, 988][index];
+        gain.gain.setValueAtTime(0.0001, start);
+        gain.gain.exponentialRampToValueAtTime(0.28, start + 0.025);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.18);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        oscillator.start(start);
+        oscillator.stop(start + 0.2);
+      });
+    } catch (error) {
+      console.warn("reservation sound", error);
+    }
+  }
+
+  async function activateAlerts() {
+    let permission = "unsupported";
+    if ("Notification" in window) {
+      permission = Notification.permission;
+      if (permission === "default") permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+    }
+    window.localStorage.setItem("reservation-alerts-enabled", "true");
+    alertsEnabledRef.current = true;
+    setAlertsEnabled(true);
+    playReservationSound();
+    if (permission === "denied") {
+      setMessage("Sonnerie activée. Les notifications du téléphone sont bloquées dans les réglages du navigateur.");
+    } else {
+      setMessage("Alertes activées. Vous entendrez cette sonnerie à la prochaine réservation.");
+    }
+  }
+
+  useEffect(() => {
+    if (!user || loading) return undefined;
+    let stopped = false;
+
+    const checkNewReservations = async () => {
+      const { data, error } = await sb
+        .from("reservations")
+        .select("*")
+        .order("reservation_date", { ascending: true })
+        .order("reservation_time", { ascending: true });
+      if (stopped || error || !data) return;
+      const newReservations = data.filter((item) => !reservationIds.current.has(item.id));
+      data.forEach((item) => reservationIds.current.add(item.id));
+      setReservations(data);
+      if (!newReservations.length || !alertsEnabledRef.current) return;
+
+      playReservationSound();
+      const latest = newReservations[newReservations.length - 1];
+      const restaurantName = names[latest.establishment_id] || "Maison Oddos";
+      const title = newReservations.length > 1
+        ? `${newReservations.length} nouvelles réservations`
+        : `Nouvelle réservation — ${restaurantName}`;
+      const body = newReservations.length > 1
+        ? "Ouvrez le tableau pour les valider."
+        : `${latest.customer_name} · ${latest.party_size} pers. · ${latest.reservation_date} à ${timeValue(latest.reservation_time)}`;
+      if ("Notification" in window && Notification.permission === "granted") {
+        const notification = new Notification(title, { body, tag: `reservation-${latest.id}` });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      }
+      setMessage(`${title}. À confirmer dans la liste ci-dessous.`);
+    };
+
+    const timer = window.setInterval(checkNewReservations, 15000);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") checkNewReservations();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [user, loading, names]);
   const today = parisToday();
   const restaurantReservations = reservations.filter((reservation) => (
     reservationEstablishment === "all" ||
@@ -265,6 +366,9 @@ export default function ReservationsAdmin() {
       <header>
         <div><div className="brand">MAISON ODDOS</div><h1>Réservations</h1></div>
         <div className="headerActions">
+          <button className={alertsEnabled ? "alertButton alertButtonActive" : "alertButton"} onClick={activateAlerts}>
+            {alertsEnabled ? "🔔 Alertes activées" : "🔔 Activer les alertes"}
+          </button>
           <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
         </div>
       </header>
@@ -274,6 +378,8 @@ export default function ReservationsAdmin() {
           <button className={view === "settings" ? "active" : "secondary"} onClick={() => setView("settings")}>Horaires et fermetures</button>
         </div>
         {message && <p className="message">{message}</p>}
+        {alertsEnabled && notificationPermission === "granted" && <p className="reservationAlertStatus">Sonnerie et notifications du téléphone actives. Gardez cette page ouverte en arrière-plan.</p>}
+        {alertsEnabled && notificationPermission !== "granted" && <p className="reservationAlertStatus">Sonnerie active lorsque cette page reste ouverte.</p>}
 
         {view === "reservations" ? <>
           <div className="grid">
