@@ -646,25 +646,63 @@ export async function POST(request) {
       }),
     );
 
-    const formData = new FormData();
+    let scanResponse = null;
+    let scanText = "";
+    let scanError = null;
+    const retryableStatuses = new Set([429, 500, 502, 503, 504]);
 
-    formData.append(
-      "file",
-      new Blob([pdfBuffer], {
-        type: "application/pdf",
-      }),
-      filename,
-    );
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const formData = new FormData();
 
-    formData.append("type", isHistorical ? "z_history" : "z");
+      formData.append(
+        "file",
+        new Blob([pdfBuffer], {
+          type: "application/pdf",
+        }),
+        filename,
+      );
+      formData.append("type", isHistorical ? "z_history" : "z");
 
-    const scanResponse = await fetch(`${url.origin}/api/scan-ai`, {
-      method: "POST",
-      body: formData,
-      cache: "no-store",
-    });
+      try {
+        scanResponse = await fetch(`${url.origin}/api/scan-ai`, {
+          method: "POST",
+          body: formData,
+          cache: "no-store",
+        });
+        scanText = await scanResponse.text();
+        scanError = null;
 
-    const scanText = await scanResponse.text();
+        if (scanResponse.ok || !retryableStatuses.has(scanResponse.status)) {
+          break;
+        }
+      } catch (error) {
+        scanError = error;
+        scanResponse = null;
+        scanText = "";
+      }
+
+      if (attempt < 3) {
+        const delayMs = attempt === 1 ? 2000 : 5000;
+        console.warn(
+          JSON.stringify({
+            level: "warning",
+            message: "Nouvelle tentative d’analyse du Z",
+            emailId,
+            filename,
+            attempt,
+            status: scanResponse?.status || null,
+            delayMs,
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    if (!scanResponse?.ok) {
+      const status = scanResponse?.status || 502;
+      const details = scanText || String(scanError?.message || scanError || "");
+      throw new Error(`Analyse IA ${status}: ${details}`);
+    }
 
     let analysis;
 
@@ -672,10 +710,6 @@ export async function POST(request) {
       analysis = JSON.parse(scanText);
     } catch {
       analysis = { raw: scanText };
-    }
-
-    if (!scanResponse.ok) {
-      throw new Error(`Analyse IA ${scanResponse.status}: ${scanText}`);
     }
 
     const persistence = isHistorical
