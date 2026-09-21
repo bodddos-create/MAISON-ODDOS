@@ -808,7 +808,7 @@ export default function Home() {
               <small>Chiffre d’affaires HT enregistré</small>
             </div>
             <div className="result">
-              <span>Résultat estimé</span>
+              <span>Résultat estimé fin de mois HT</span>
               <strong>{euro(totals.result)}</strong>
             </div>
           </div>
@@ -830,7 +830,7 @@ export default function Home() {
             <Card t="Achats" v={euro(totals.achats)} />
             <Card t="Personnel" v={euro(totals.personnel)} />
             <Card t="Charges fixes" v={euro(totals.fixes)} />
-            <Card t="Marge après charges" v={euro(totals.result)} />
+            <Card t="Marge à ce jour HT" v={euro(totals.result)} />
             <article
               className="card"
               data-daily-fixed-personnel="true"
