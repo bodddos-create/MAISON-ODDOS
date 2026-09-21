@@ -23,6 +23,11 @@ const euro = (n) =>
     Number(n || 0),
   );
 const sign = (x) => (x.document_type === "credit_note" ? -1 : 1);
+const supplierKey = (value) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("fr-FR");
 const st = {
   width: "100%",
   boxSizing: "border-box",
@@ -36,7 +41,16 @@ export default function Factures() {
     [imports, setImports] = useState([]),
     [edit, setEdit] = useState(null),
     [msg, setMsg] = useState(""),
-    [busy, setBusy] = useState(false);
+    [busy, setBusy] = useState(false),
+    [selectedSupplier, setSelectedSupplier] = useState(""),
+    [supplierPeriodMode, setSupplierPeriodMode] = useState("month"),
+    [supplierMonth, setSupplierMonth] = useState(
+      new Date().toISOString().slice(0, 7),
+    ),
+    [supplierYear, setSupplierYear] = useState(
+      String(new Date().getFullYear()),
+    ),
+    [supplierEstablishment, setSupplierEstablishment] = useState("all");
   useEffect(() => {
     sb.auth.getUser().then(({ data }) => setUser(data?.user || null));
   }, []);
@@ -191,6 +205,41 @@ export default function Factures() {
     setMsg("✓ Document supprimé.");
     await load();
   }
+  const supplierOptions = [
+    ...new Map(
+      rows
+        .filter((x) => supplierKey(x.supplier))
+        .map((x) => [supplierKey(x.supplier), String(x.supplier).trim()]),
+    ).entries(),
+  ].sort((a, b) => a[1].localeCompare(b[1], "fr", { sensitivity: "base" }));
+  const supplierYears = [
+    ...new Set(
+      rows
+        .map((x) => String(x.invoice_date || "").slice(0, 4))
+        .filter((year) => /^\d{4}$/.test(year)),
+    ),
+  ].sort((a, b) => b.localeCompare(a));
+  const supplierPeriod =
+    supplierPeriodMode === "month" ? supplierMonth : supplierYear;
+  const supplierSummaryRows = selectedSupplier
+    ? rows.filter(
+        (x) =>
+          supplierKey(x.supplier) === selectedSupplier &&
+          String(x.invoice_date || "").startsWith(supplierPeriod) &&
+          (supplierEstablishment === "all" ||
+            x.establishment_id === supplierEstablishment),
+      )
+    : [];
+  const supplierTotalHt = supplierSummaryRows.reduce(
+    (total, x) => total + sign(x) * Number(x.amount_ht || 0),
+    0,
+  );
+  const supplierInvoiceCount = supplierSummaryRows.filter(
+    (x) => x.document_type !== "credit_note",
+  ).length;
+  const supplierCreditCount = supplierSummaryRows.filter(
+    (x) => x.document_type === "credit_note",
+  ).length;
   if (user === undefined)
     return (
       <main>
@@ -464,6 +513,114 @@ export default function Factures() {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="formCard" style={{ marginBottom: 28 }}>
+          <h2>Achats HT par fournisseur</h2>
+          <p>
+            Sélectionnez un fournisseur et une période. Les avoirs sont
+            automatiquement déduits du total HT.
+          </p>
+          <div className="grid">
+            <label>
+              Fournisseur
+              <select
+                value={selectedSupplier}
+                onChange={(e) => setSelectedSupplier(e.target.value)}
+                style={st}
+              >
+                <option value="">Choisir un fournisseur</option>
+                {supplierOptions.map(([key, label]) => (
+                  <option key={key} value={key}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Calcul par
+              <select
+                value={supplierPeriodMode}
+                onChange={(e) => setSupplierPeriodMode(e.target.value)}
+                style={st}
+              >
+                <option value="month">Mois</option>
+                <option value="year">Année</option>
+              </select>
+            </label>
+            {supplierPeriodMode === "month" ? (
+              <label>
+                Mois
+                <input
+                  type="month"
+                  value={supplierMonth}
+                  onChange={(e) => setSupplierMonth(e.target.value)}
+                  style={st}
+                />
+              </label>
+            ) : (
+              <label>
+                Année
+                <select
+                  value={supplierYear}
+                  onChange={(e) => setSupplierYear(e.target.value)}
+                  style={st}
+                >
+                  {supplierYears.length ? (
+                    supplierYears.map((year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    ))
+                  ) : (
+                    <option value={supplierYear}>{supplierYear}</option>
+                  )}
+                </select>
+              </label>
+            )}
+            <label>
+              Établissement
+              <select
+                value={supplierEstablishment}
+                onChange={(e) => setSupplierEstablishment(e.target.value)}
+                style={st}
+              >
+                <option value="all">Tous les établissements</option>
+                {ests.map((x) => (
+                  <option key={x.id} value={x.id}>
+                    {x.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div
+            style={{
+              marginTop: 18,
+              padding: 20,
+              borderRadius: 14,
+              background: selectedSupplier ? "#e8f3e8" : "#f3f1eb",
+            }}
+          >
+            {selectedSupplier ? (
+              <>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#48633a" }}>
+                  TOTAL ACHETÉ HT · {supplierPeriod}
+                </div>
+                <div style={{ fontSize: 34, fontWeight: 900, marginTop: 5 }}>
+                  {euro(supplierTotalHt)}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  {supplierInvoiceCount} facture
+                  {supplierInvoiceCount > 1 ? "s" : ""}
+                  {supplierCreditCount
+                    ? ` · ${supplierCreditCount} avoir${supplierCreditCount > 1 ? "s" : ""} déduit${supplierCreditCount > 1 ? "s" : ""}`
+                    : ""}
+                </div>
+              </>
+            ) : (
+              <b>Choisissez un fournisseur pour afficher son total HT.</b>
+            )}
+          </div>
         </div>
         <h2>Factures et avoirs fournisseurs</h2>
         <div className="table">
