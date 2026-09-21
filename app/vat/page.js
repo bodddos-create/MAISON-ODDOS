@@ -719,7 +719,7 @@ export default function VatPage() {
                     <tr>
                       <th>Date</th>
                       <th>Restaurant</th>
-                      <th>CA HT</th>
+                      <th>CA TTC</th>
                       <th>Couverts</th>
                       <th>Actions</th>
                     </tr>
