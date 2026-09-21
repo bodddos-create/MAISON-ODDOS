@@ -102,7 +102,7 @@ export default function ReservationsAdmin() {
       } else if (body.email_reason === "no_email") {
         setMessage("Réservation confirmée, mais le client n’a pas renseigné d’adresse e-mail.");
       } else {
-        setMessage("Réservation confirmée, mais le courriel n’a pas pu être envoyé. Vous pouvez cliquer à nouveau sur Confirmer.");
+        setMessage(`Réservation confirmée, mais le courriel n’a pas pu être envoyé${body.email_details ? ` : ${body.email_details}` : "."} Vous pouvez cliquer à nouveau sur Confirmer.`);
       }
     } catch (error) {
       setMessage(`Erreur : ${error.message || "mise à jour impossible"}`);

@@ -90,7 +90,7 @@ async function sendAcknowledgement(config, reservation, restaurantName) {
     body: JSON.stringify({
       from:
         process.env.RESERVATION_FROM ||
-        "Maison Oddos <reservations@reception.oddos.eu>",
+        "Réservations Maison Oddos <factures@reception.oddos.eu>",
       to: [reservation.email],
       subject: `Demande de réservation reçue — ${restaurantName}`,
       text: `Bonjour ${reservation.customer_name},\n\nNous avons bien reçu votre demande pour ${restaurantName}, le ${formattedDate} à ${String(reservation.reservation_time).slice(0, 5)}, pour ${reservation.party_size} personne${reservation.party_size > 1 ? "s" : ""}.\n\nRéférence : ${reservation.confirmation_code}\n\nVotre réservation est en attente de confirmation par le restaurant.\n\nÀ très bientôt,\nMaison Oddos`,
@@ -123,7 +123,7 @@ async function sendConfirmation(config, reservation, restaurantName) {
     body: JSON.stringify({
       from:
         process.env.RESERVATION_FROM ||
-        "Maison Oddos <reservations@reception.oddos.eu>",
+        "Réservations Maison Oddos <factures@reception.oddos.eu>",
       to: [reservation.email],
       subject: `Réservation confirmée — ${restaurantName}`,
       text: `Bonjour ${reservation.customer_name},
@@ -144,8 +144,18 @@ Maison Oddos`,
     cache: "no-store",
   });
   if (!response.ok) {
-    console.error("reservation confirmation email", response.status, await response.text());
-    return { sent: false, reason: "send_error" };
+    const responseText = await response.text();
+    console.error("reservation confirmation email", response.status, responseText);
+    let details = `Resend ${response.status}`;
+    try {
+      const providerError = JSON.parse(responseText);
+      details = String(
+        providerError?.message ||
+        providerError?.error?.message ||
+        details,
+      ).slice(0, 240);
+    } catch {}
+    return { sent: false, reason: "send_error", details };
   }
   return { sent: true };
 }
@@ -373,6 +383,7 @@ export async function PATCH(request) {
       reservation,
       email_sent: email.sent,
       email_reason: email.reason || null,
+      email_details: email.details || null,
     });
   } catch (error) {
     console.error("reservation PATCH", error);
