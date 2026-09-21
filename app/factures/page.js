@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -35,6 +35,7 @@ const st = {
   marginTop: 6,
 };
 export default function Factures() {
+  const editFormRef = useRef(null);
   const [user, setUser] = useState(undefined),
     [ests, setEsts] = useState([]),
     [rows, setRows] = useState([]),
@@ -57,6 +58,16 @@ export default function Factures() {
   useEffect(() => {
     if (user) load();
   }, [user]);
+  useEffect(() => {
+    if (!edit?.id) return;
+
+    const frame = window.requestAnimationFrame(() => {
+      editFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      editFormRef.current?.focus({ preventScroll: true });
+    });
+
+    return () => window.cancelAnimationFrame(frame);
+  }, [edit?.id]);
   async function load() {
     const [{ data: e }, { data: i }, { data: pending }] = await Promise.all([
       sb.from("establishments").select("id,name").eq("active", true),
@@ -273,7 +284,12 @@ export default function Factures() {
       </header>
       <section>
         {edit && (
-          <div className="formCard" style={{ maxWidth: 850, marginBottom: 24 }}>
+          <div
+            ref={editFormRef}
+            tabIndex={-1}
+            className="formCard"
+            style={{ maxWidth: 850, marginBottom: 24, scrollMarginTop: 16 }}
+          >
             <h2>Modifier le document</h2>
             <form onSubmit={save}>
               <div className="grid">
