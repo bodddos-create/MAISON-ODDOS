@@ -107,21 +107,25 @@ export async function POST(request) {
         password,
         email_confirm: true,
         app_metadata: { maison_oddos_role: "reservation_staff" },
+        user_metadata: { full_name: fullName },
       }),
     });
     createdUserId = authUser?.id;
     if (!createdUserId) throw new Error("Identifiant du compte absent");
 
-    const profiles = await serviceRequest(config, "/rest/v1/profiles", {
-      method: "POST",
+    const profiles = await serviceRequest(
+      config,
+      `/rest/v1/profiles?user_id=eq.${encodeURIComponent(createdUserId)}`,
+      {
+      method: "PATCH",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
-        user_id: createdUserId,
         full_name: fullName,
         role: "reservation_staff",
         establishment_id: establishmentId,
       }),
     });
+    if (!profiles?.[0]) throw new Error("Profil automatique introuvable");
     return NextResponse.json({ ok: true, user: { ...profiles?.[0], email } });
   } catch (error) {
     console.error("team users POST", error);
