@@ -27,6 +27,7 @@ const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
 
 export default function ReservationsAdmin() {
   const [user, setUser] = useState(undefined);
+  const [profile, setProfile] = useState(undefined);
   const [reservations, setReservations] = useState([]);
   const [establishments, setEstablishments] = useState([]);
   const [services, setServices] = useState([]);
@@ -42,12 +43,33 @@ export default function ReservationsAdmin() {
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState("default");
   const [closure, setClosure] = useState({ exception_date: "", note: "" });
+  const [teamUsers, setTeamUsers] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamForm, setTeamForm] = useState({
+    full_name: "",
+    email: "",
+    password: "",
+    establishment_id: "",
+  });
   const reservationIds = useRef(new Set());
   const alertsEnabledRef = useRef(false);
   const audioContextRef = useRef(null);
 
   useEffect(() => {
-    sb.auth.getUser().then(({ data }) => setUser(data?.user || null));
+    sb.auth.getUser().then(async ({ data }) => {
+      const currentUser = data?.user || null;
+      setUser(currentUser);
+      if (!currentUser) {
+        setProfile(null);
+        return;
+      }
+      const { data: currentProfile } = await sb
+        .from("profiles")
+        .select("user_id,full_name,role,establishment_id")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+      setProfile(currentProfile || null);
+    });
     const enabled = window.localStorage.getItem("reservation-alerts-enabled") === "true";
     alertsEnabledRef.current = enabled;
     setAlertsEnabled(enabled);
@@ -76,8 +98,11 @@ export default function ReservationsAdmin() {
   }
 
   useEffect(() => {
-    if (user) load();
-  }, [user]);
+    if (user && profile) load();
+  }, [user, profile]);
+
+  const isManagement = ["direction", "administratif"].includes(profile?.role);
+  const isReservationStaff = profile?.role === "reservation_staff";
 
   const names = useMemo(
     () => Object.fromEntries(establishments.map((item) => [item.id, item.name])),
@@ -192,6 +217,89 @@ export default function ReservationsAdmin() {
   };
   const selectedServices = services.filter((item) => item.establishment_id === selectedEstablishment);
   const selectedExceptions = exceptions.filter((item) => item.establishment_id === selectedEstablishment);
+
+  async function authenticatedTeamRequest(options = {}) {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.access_token) throw new Error("Votre session a expiré. Reconnectez-vous.");
+    const response = await fetch("/api/team-users", {
+      ...options,
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      },
+    });
+    const body = await response.json();
+    if (!response.ok) throw new Error(body.error || "Opération impossible.");
+    return body;
+  }
+
+  async function loadTeamUsers() {
+    if (!isManagement) return;
+    setTeamLoading(true);
+    try {
+      const body = await authenticatedTeamRequest();
+      setTeamUsers(body.users || []);
+    } catch (error) {
+      setMessage(`Erreur : ${error.message}`);
+    } finally {
+      setTeamLoading(false);
+    }
+  }
+
+  async function createTeamUser(event) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage("");
+    try {
+      const body = await authenticatedTeamRequest({
+        method: "POST",
+        body: JSON.stringify(teamForm),
+      });
+      setTeamUsers((items) => [...items, body.user]);
+      setTeamForm({
+        full_name: "",
+        email: "",
+        password: "",
+        establishment_id: establishments[0]?.id || "",
+      });
+      setMessage("Accès équipe créé. Vous pouvez transmettre l’adresse /equipe et le mot de passe au salarié.");
+    } catch (error) {
+      setMessage(`Erreur : ${error.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteTeamUser(teamUser) {
+    if (!window.confirm(`Supprimer l’accès de ${teamUser.full_name || teamUser.email} ?`)) return;
+    setMessage("");
+    try {
+      await authenticatedTeamRequest({
+        method: "DELETE",
+        body: JSON.stringify({ user_id: teamUser.user_id }),
+      });
+      setTeamUsers((items) => items.filter((item) => item.user_id !== teamUser.user_id));
+      setMessage("Accès équipe supprimé.");
+    } catch (error) {
+      setMessage(`Erreur : ${error.message}`);
+    }
+  }
+
+  useEffect(() => {
+    if (view === "team" && isManagement) loadTeamUsers();
+  }, [view, isManagement]);
+
+  useEffect(() => {
+    if (!teamForm.establishment_id && establishments[0]?.id) {
+      setTeamForm((current) => ({ ...current, establishment_id: establishments[0].id }));
+    }
+  }, [establishments, teamForm.establishment_id]);
+
+  async function logout() {
+    await sb.auth.signOut();
+    window.location.replace("/equipe");
+  }
 
   async function changeStatus(id, status) {
     setMessage("");
@@ -354,8 +462,9 @@ export default function ReservationsAdmin() {
     setMessage("Fermeture supprimée.");
   }
 
-  if (user === undefined || (user && loading)) return <main><section><p>Chargement des réservations…</p></section></main>;
-  if (!user) return <main><section><h2>Accès protégé</h2><p>Connectez-vous d’abord à Maison Oddos.</p><a href="/"><button>Retour à la connexion</button></a></section></main>;
+  if (user === undefined || profile === undefined || (user && profile && loading)) return <main><section><p>Chargement des réservations…</p></section></main>;
+  if (!user) return <main><section><h2>Accès protégé</h2><p>Connectez-vous à l’espace équipe Maison Oddos.</p><a href="/equipe"><button>Se connecter</button></a></section></main>;
+  if (!isManagement && !isReservationStaff) return <main><section><h2>Accès refusé</h2><p>Ce compte n’est pas autorisé à gérer les réservations.</p><button onClick={logout}>Déconnexion</button></section></main>;
 
   const pendingCount = restaurantReservations.filter((item) => item.status === "pending" && item.reservation_date >= today).length;
   const confirmedCount = restaurantReservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).length;
@@ -370,12 +479,15 @@ export default function ReservationsAdmin() {
             {alertsEnabled ? "🔔 Alertes activées" : "🔔 Activer les alertes"}
           </button>
           <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
+          {isManagement && <a href="/"><button className="secondary">Pilotage</button></a>}
+          <button className="secondary" onClick={logout}>Déconnexion</button>
         </div>
       </header>
       <section>
         <div className="reservationViewTabs">
           <button className={view === "reservations" ? "active" : "secondary"} onClick={() => setView("reservations")}>Réservations</button>
-          <button className={view === "settings" ? "active" : "secondary"} onClick={() => setView("settings")}>Horaires et fermetures</button>
+          {isManagement && <button className={view === "settings" ? "active" : "secondary"} onClick={() => setView("settings")}>Horaires et fermetures</button>}
+          {isManagement && <button className={view === "team" ? "active" : "secondary"} onClick={() => setView("team")}>Accès équipe</button>}
         </div>
         {message && <p className="message">{message}</p>}
         {alertsEnabled && notificationPermission === "granted" && <p className="reservationAlertStatus">Sonnerie et notifications du téléphone actives. Gardez cette page ouverte en arrière-plan.</p>}
@@ -388,13 +500,13 @@ export default function ReservationsAdmin() {
             <article className="card"><span>Couverts confirmés à venir</span><strong>{upcomingCovers}</strong></article>
           </div>
           <div className="reservationToolbar">
-            <label>Restaurant
+            {isManagement ? <label>Restaurant
               <select value={reservationEstablishment} onChange={(event) => setReservationEstablishment(event.target.value)}>
                 <option value="all">Tous les restaurants</option>
                 {establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
-            </label>
-            <button className="secondary" onClick={exportCustomerEmails}>Exporter les e-mails clients</button>
+            </label> : <div className="formCard"><b>{names[profile.establishment_id] || establishments[0]?.name || "Votre restaurant"}</b></div>}
+            {isManagement && <button className="secondary" onClick={exportCustomerEmails}>Exporter les e-mails clients</button>}
           </div>
           <div className="reservationFilters">
             {[["upcoming", "À venir"], ["pending", "À confirmer"], ["all", "Toutes à venir"]].map(([value, label]) => <button key={value} className={filter === value ? "active" : "secondary"} onClick={() => setFilter(value)}>{label}</button>)}
@@ -403,10 +515,10 @@ export default function ReservationsAdmin() {
             {visible.map((reservation) => <article className="reservationCard" key={reservation.id}>
               <div className="reservationDate"><strong>{new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}</strong><span>{timeValue(reservation.reservation_time)}</span></div>
               <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span><h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <small>{reservation.notes}</small>}</div>
-              <div className="reservationActions"><button onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button></div>
+              <div className="reservationActions"><button onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{isManagement && <button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button>}</div>
             </article>)}
           </div>}
-        </> : <div className="settingsLayout">
+        </> : view === "settings" ? <div className="settingsLayout">
           <div className="settingsToolbar">
             <label>Restaurant<select value={selectedEstablishment} onChange={(event) => setSelectedEstablishment(event.target.value)}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label className="toggleLine"><input type="checkbox" checked={Boolean(selectedSetting.online_enabled)} onChange={(event) => changeSetting("online_enabled", event.target.checked)} /><span>Réservations en ligne ouvertes</span></label>
@@ -437,6 +549,32 @@ export default function ReservationsAdmin() {
             <div><span>Fermetures exceptionnelles</span><h2>Bloquer une date</h2><p>La date ne proposera aucun créneau sur la page client.</p></div>
             <form className="closureForm" onSubmit={addClosure}><label>Date<input required type="date" value={closure.exception_date} onChange={(event) => setClosure({ ...closure, exception_date: event.target.value })} /></label><label>Motif <small>facultatif</small><input placeholder="Congés, privatisation…" value={closure.note} onChange={(event) => setClosure({ ...closure, note: event.target.value })} /></label><button>Ajouter la fermeture</button></form>
             <div className="closureList">{!selectedExceptions.length ? <p>Aucune fermeture exceptionnelle enregistrée.</p> : selectedExceptions.map((item) => <div key={item.id}><b>{new Date(`${item.exception_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</b><span>{item.note || "Fermé"}</span><button className="secondary" onClick={() => removeClosure(item.id)}>Supprimer</button></div>)}</div>
+          </article>
+        </div> : <div className="settingsLayout">
+          <article className="closureCard">
+            <div>
+              <span>Comptes salariés</span>
+              <h2>Accès réservations uniquement</h2>
+              <p>Chaque compte est limité au restaurant choisi et ne peut pas ouvrir le pilotage.</p>
+            </div>
+            <form className="closureForm" onSubmit={createTeamUser}>
+              <label>Nom du salarié<input required minLength="2" value={teamForm.full_name} onChange={(event) => setTeamForm({ ...teamForm, full_name: event.target.value })} /></label>
+              <label>Adresse e-mail<input required type="email" value={teamForm.email} onChange={(event) => setTeamForm({ ...teamForm, email: event.target.value })} /></label>
+              <label>Mot de passe provisoire<input required type="password" minLength="10" value={teamForm.password} onChange={(event) => setTeamForm({ ...teamForm, password: event.target.value })} /><small>10 caractères minimum</small></label>
+              <label>Restaurant<select required value={teamForm.establishment_id} onChange={(event) => setTeamForm({ ...teamForm, establishment_id: event.target.value })}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+              <button disabled={saving}>{saving ? "Création…" : "Créer l’accès équipe"}</button>
+            </form>
+            <p><b>Adresse à transmettre :</b> {typeof window !== "undefined" ? `${window.location.origin}/equipe` : "/equipe"}</p>
+          </article>
+          <article className="closureCard">
+            <div><span>Accès actifs</span><h2>Équipe réservations</h2></div>
+            {teamLoading ? <p>Chargement…</p> : <div className="closureList">
+              {!teamUsers.length ? <p>Aucun accès équipe créé.</p> : teamUsers.map((teamUser) => <div key={teamUser.user_id}>
+                <b>{teamUser.full_name || teamUser.email}</b>
+                <span>{teamUser.email} · {names[teamUser.establishment_id] || "Restaurant"}</span>
+                <button className="dangerButton" onClick={() => deleteTeamUser(teamUser)}>Supprimer l’accès</button>
+              </div>)}
+            </div>}
           </article>
         </div>}
       </section>
