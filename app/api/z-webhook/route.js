@@ -753,7 +753,7 @@ async function processIncomingEmail({ url, payload }) {
     ].map((match) => `${match[1]}-${match[2]}-${match[3]}`);
     const filenameDates = extractReportDates(filename);
     const reportDates =
-      filenameDates.length >= 2
+      filenameDates.length
         ? filenameDates
         : extractReportDates(historicalMarker);
     const hasDistinctDateRange =
