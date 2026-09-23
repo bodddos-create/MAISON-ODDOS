@@ -90,6 +90,84 @@ function safeFilename(value) {
     .slice(0, 120);
 }
 
+function periodEnd(date, type) {
+  const [year, month, day] = String(date).split("-").map(Number);
+  if (type === "year") return `${year}-12-31`;
+  if (type === "month") {
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    return `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+async function downloadArchivedDocument(config, path, filename) {
+  const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+  const response = await fetch(
+    `${config.supabaseUrl}/storage/v1/object/authenticated/accounting-documents/${encodedPath}`,
+    {
+      headers: {
+        apikey: config.secretKey,
+        Authorization: `Bearer ${config.secretKey}`,
+      },
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`Téléchargement du Z archivé impossible : ${response.status}`);
+  }
+  return new File(
+    [await response.arrayBuffer()],
+    filename || "rapport-z.pdf",
+    { type: response.headers.get("content-type") || "application/pdf" },
+  );
+}
+
+async function resolveArchivedDocument(config, source) {
+  const [kind, id] = String(source || "").split(":");
+  if (!["daily", "history"].includes(kind) || !uuidPattern.test(id || "")) {
+    throw new Error("Z archivé invalide");
+  }
+
+  if (kind === "daily") {
+    const rows = await serviceRequest(
+      config,
+      `/rest/v1/daily_sales?id=eq.${encodeURIComponent(id)}&select=id,establishment_id,business_date,z_document_path,z_document_name&limit=1`,
+    );
+    const row = rows?.[0];
+    if (!row?.z_document_path) throw new Error("PDF du Z introuvable");
+    return {
+      establishmentId: row.establishment_id,
+      periodStart: row.business_date,
+      periodEnd: row.business_date,
+      path: row.z_document_path,
+      filename: row.z_document_name || "rapport-z.pdf",
+    };
+  }
+
+  const selectedRows = await serviceRequest(
+    config,
+    `/rest/v1/historical_ca?id=eq.${encodeURIComponent(id)}&select=id,establishment_id,period_start,period_type,source_document_path,source_filename&limit=1`,
+  );
+  const selected = selectedRows?.[0];
+  if (!selected?.source_document_path) throw new Error("PDF historique introuvable");
+  const related = await serviceRequest(
+    config,
+    `/rest/v1/historical_ca?source_document_path=eq.${encodeURIComponent(selected.source_document_path)}&establishment_id=eq.${encodeURIComponent(selected.establishment_id)}&select=period_start,period_type`,
+  );
+  const starts = (related || []).map((row) => row.period_start).filter(Boolean).sort();
+  const ends = (related || [])
+    .map((row) => periodEnd(row.period_start, row.period_type))
+    .filter(Boolean)
+    .sort();
+  return {
+    establishmentId: selected.establishment_id,
+    periodStart: starts[0] || selected.period_start,
+    periodEnd: ends.at(-1) || periodEnd(selected.period_start, selected.period_type),
+    path: selected.source_document_path,
+    filename: selected.source_filename || "rapport-z-historique.pdf",
+  };
+}
+
 async function archiveDocument(config, file, periodStart) {
   const folder = periodStart.slice(0, 7);
   const path = `product-analysis/${folder}/${crypto.randomUUID()}-${safeFilename(file.name)}`;
@@ -124,15 +202,39 @@ export async function POST(request) {
     }
 
     const form = await request.formData();
-    const file = form.get("file");
-    const establishmentId = String(form.get("establishment_id") || "");
-    const periodStart = String(form.get("period_start") || "");
-    const periodEnd = String(form.get("period_end") || "");
+    const archivedSource = String(form.get("existing_source") || "");
+    let file = form.get("file");
+    let establishmentId = String(form.get("establishment_id") || "");
+    let periodStart = String(form.get("period_start") || "");
+    let periodEndValue = String(form.get("period_end") || "");
+    let documentPath = "";
+
+    if (archivedSource) {
+      const archived = await resolveArchivedDocument(config, archivedSource);
+      establishmentId = archived.establishmentId;
+      periodStart = archived.periodStart;
+      periodEndValue = archived.periodEnd;
+      documentPath = archived.path;
+
+      const existingRuns = await serviceRequest(
+        config,
+        `/rest/v1/product_analysis_runs?source_document_path=eq.${encodeURIComponent(documentPath)}&select=id,line_count&order=created_at.desc&limit=1`,
+      );
+      if (existingRuns?.[0]) {
+        return NextResponse.json({
+          ok: true,
+          already_analyzed: true,
+          analysis_id: existingRuns[0].id,
+          line_count: existingRuns[0].line_count,
+        });
+      }
+      file = await downloadArchivedDocument(config, archived.path, archived.filename);
+    }
 
     if (!file || typeof file.arrayBuffer !== "function") {
       return NextResponse.json({ error: "Sélectionnez un Z détaillé." }, { status: 400 });
     }
-    if (!uuidPattern.test(establishmentId) || !datePattern.test(periodStart) || !datePattern.test(periodEnd) || periodEnd < periodStart) {
+    if (!uuidPattern.test(establishmentId) || !datePattern.test(periodStart) || !datePattern.test(periodEndValue) || periodEndValue < periodStart) {
       return NextResponse.json({ error: "Restaurant ou période invalide." }, { status: 400 });
     }
     const mediaType = String(file.type || "").toLowerCase();
@@ -190,7 +292,9 @@ export async function POST(request) {
       );
     }
 
-    const documentPath = await archiveDocument(config, file, periodStart);
+    if (!documentPath) {
+      documentPath = await archiveDocument(config, file, periodStart);
+    }
     const confidences = products.map((item) => item.confidence).filter(Number.isFinite);
     const confidence = confidences.length
       ? round(confidences.reduce((sum, value) => sum + value, 0) / confidences.length, 4)
@@ -202,7 +306,7 @@ export async function POST(request) {
       body: JSON.stringify({
         establishment_id: establishmentId,
         period_start: periodStart,
-        period_end: periodEnd,
+        period_end: periodEndValue,
         source_filename: file.name || "rapport-z.pdf",
         source_document_path: documentPath,
         status: "analyzed",
@@ -221,7 +325,7 @@ export async function POST(request) {
         analysis_id: runId,
         establishment_id: establishmentId,
         period_start: periodStart,
-        period_end: periodEnd,
+        period_end: periodEndValue,
         ...item,
       }))),
     });
@@ -232,7 +336,7 @@ export async function POST(request) {
       line_count: products.length,
       restaurant: analysis.result.restaurant || "",
       period_start: periodStart,
-      period_end: periodEnd,
+      period_end: periodEndValue,
     });
   } catch (error) {
     console.error("product analysis", error);

@@ -19,9 +19,11 @@ export default function AnalyseProduitsPage() {
   const [access, setAccess] = useState({ loading: true, allowed: false });
   const [establishments, setEstablishments] = useState([]);
   const [runs, setRuns] = useState([]);
+  const [archivedDocuments, setArchivedDocuments] = useState([]);
   const [lines, setLines] = useState([]);
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
+  const [selectedArchive, setSelectedArchive] = useState("");
   const [periodStart, setPeriodStart] = useState(monthStart);
   const [periodEnd, setPeriodEnd] = useState(today);
   const [file, setFile] = useState(null);
@@ -32,15 +34,65 @@ export default function AnalyseProduitsPage() {
   const [error, setError] = useState("");
 
   const loadRuns = useCallback(async () => {
-    const [{ data: estRows, error: estError }, { data: runRows, error: runError }] = await Promise.all([
+    const [
+      { data: estRows, error: estError },
+      { data: runRows, error: runError },
+      { data: dailyRows, error: dailyError },
+      { data: historyRows, error: historyError },
+    ] = await Promise.all([
       sb.from("establishments").select("id,name").eq("active", true).order("name"),
       sb.from("product_analysis_runs")
-        .select("id,establishment_id,period_start,period_end,source_filename,status,confidence,line_count,created_at")
+        .select("id,establishment_id,period_start,period_end,source_filename,source_document_path,status,confidence,line_count,created_at")
         .order("created_at", { ascending: false }),
+      sb.from("daily_sales")
+        .select("id,establishment_id,business_date,z_document_name,z_document_path")
+        .not("z_document_path", "is", null)
+        .order("business_date", { ascending: false }),
+      sb.from("historical_ca")
+        .select("id,establishment_id,period_start,period_type,source_filename,source_document_path")
+        .not("source_document_path", "is", null)
+        .order("period_start", { ascending: false }),
     ]);
-    if (estError || runError) throw estError || runError;
+    if (estError || runError || dailyError || historyError) {
+      throw estError || runError || dailyError || historyError;
+    }
+
+    const analyzedPaths = new Set((runRows || []).map((run) => run.source_document_path).filter(Boolean));
+    const seenPaths = new Set();
+    const documents = [];
+
+    (dailyRows || []).forEach((row) => {
+      if (!row.z_document_path || seenPaths.has(row.z_document_path)) return;
+      seenPaths.add(row.z_document_path);
+      documents.push({
+        value: `daily:${row.id}`,
+        establishment_id: row.establishment_id,
+        date: row.business_date,
+        filename: row.z_document_name || "Rapport Z",
+        path: row.z_document_path,
+        kind: "Journalier",
+        analyzed: analyzedPaths.has(row.z_document_path),
+      });
+    });
+
+    (historyRows || []).forEach((row) => {
+      if (!row.source_document_path || seenPaths.has(row.source_document_path)) return;
+      seenPaths.add(row.source_document_path);
+      documents.push({
+        value: `history:${row.id}`,
+        establishment_id: row.establishment_id,
+        date: row.period_start,
+        filename: row.source_filename || "Rapport Z historique",
+        path: row.source_document_path,
+        kind: row.period_type === "year" ? "Annuel" : row.period_type === "month" ? "Mensuel" : "Historique",
+        analyzed: analyzedPaths.has(row.source_document_path),
+      });
+    });
+
+    documents.sort((a, b) => String(b.date).localeCompare(String(a.date)));
     setEstablishments(estRows || []);
     setRuns(runRows || []);
+    setArchivedDocuments(documents);
     setSelectedEstablishment((current) => current || estRows?.[0]?.id || "");
   }, []);
 
@@ -74,12 +126,22 @@ export default function AnalyseProduitsPage() {
     () => runs.filter((run) => run.establishment_id === selectedEstablishment),
     [runs, selectedEstablishment],
   );
+  const availableDocuments = useMemo(
+    () => archivedDocuments.filter((document) => document.establishment_id === selectedEstablishment),
+    [archivedDocuments, selectedEstablishment],
+  );
 
   useEffect(() => {
     if (!availableRuns.some((run) => run.id === selectedRun)) {
       setSelectedRun(availableRuns[0]?.id || "");
     }
   }, [availableRuns, selectedRun]);
+
+  useEffect(() => {
+    if (!availableDocuments.some((document) => document.value === selectedArchive)) {
+      setSelectedArchive(availableDocuments[0]?.value || "");
+    }
+  }, [availableDocuments, selectedArchive]);
 
   useEffect(() => {
     let active = true;
@@ -150,6 +212,41 @@ export default function AnalyseProduitsPage() {
     };
   }, [lines, includeComponents, ranking]);
 
+  async function analyzeArchived() {
+    setError("");
+    setMessage("");
+    if (!selectedArchive) {
+      setError("Aucun Z archivé n’est disponible pour ce restaurant.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Votre session a expiré.");
+      const form = new FormData();
+      form.append("existing_source", selectedArchive);
+      const response = await fetch("/api/product-analysis", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Analyse impossible.");
+      await loadRuns();
+      setSelectedRun(body.analysis_id);
+      setMessage(
+        body.already_analyzed
+          ? "Ce Z avait déjà été analysé : son résultat est affiché."
+          : `${body.line_count} lignes produits lues depuis le Z archivé.`,
+      );
+    } catch (analysisError) {
+      setError(analysisError.message || "Analyse impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function submit(event) {
     event.preventDefault();
     setError("");
@@ -216,7 +313,52 @@ export default function AnalyseProduitsPage() {
 
       <section>
         <div className="formCard">
-          <h2>Analyser un Z détaillé</h2>
+          <h2>Lire un Z déjà archivé</h2>
+          <p>Choisissez directement un PDF déjà reçu et conservé dans Maison Oddos.</p>
+          <div className="grid">
+            <label>
+              Établissement
+              <select
+                value={selectedEstablishment}
+                onChange={(event) => setSelectedEstablishment(event.target.value)}
+                style={{ width: "100%", padding: 11, marginTop: 6 }}
+              >
+                {establishments.map((establishment) => (
+                  <option key={establishment.id} value={establishment.id}>
+                    {establishment.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Z disponible dans la base
+              <select
+                value={selectedArchive}
+                onChange={(event) => setSelectedArchive(event.target.value)}
+                style={{ width: "100%", padding: 11, marginTop: 6 }}
+              >
+                {!availableDocuments.length && <option value="">Aucun Z archivé</option>}
+                {availableDocuments.map((document) => (
+                  <option key={document.value} value={document.value}>
+                    {document.date} · {document.kind} · {document.filename}
+                    {document.analyzed ? " · déjà analysé" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={analyzeArchived}
+            disabled={busy || !selectedArchive}
+            style={{ marginTop: 16 }}
+          >
+            {busy ? "Lecture en cours…" : "Analyser ce Z archivé"}
+          </button>
+        </div>
+
+        <div className="formCard" style={{ marginTop: 22 }}>
+          <h2>Importer un nouveau Z détaillé</h2>
           <p>
             Importez le rapport qui contient les lignes d’articles vendus. Un Z avec seulement
             le CA et la TVA ne permet pas d’analyser les produits.
@@ -260,9 +402,10 @@ export default function AnalyseProduitsPage() {
               {busy ? "Lecture en cours…" : "Analyser et enregistrer"}
             </button>
           </form>
-          {message && <p style={{ color: "#185c2b", fontWeight: 800 }}>{message}</p>}
-          {error && <p style={{ color: "#b42318", fontWeight: 800 }}>Erreur : {error}</p>}
         </div>
+
+        {message && <p style={{ color: "#185c2b", fontWeight: 800 }}>{message}</p>}
+        {error && <p style={{ color: "#b42318", fontWeight: 800 }}>Erreur : {error}</p>}
 
         <div className="formCard" style={{ marginTop: 22 }}>
           <div className="grid">
