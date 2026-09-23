@@ -81,7 +81,7 @@ export async function POST(req) {
     const form = await req.formData();
     const file = form.get("file");
     const requestedType = String(form.get("type") || "");
-    const type = ["z", "z_history"].includes(requestedType)
+    const type = ["z", "z_history", "z_products"].includes(requestedType)
       ? requestedType
       : "invoice";
 
@@ -121,13 +121,17 @@ export async function POST(req) {
         ? invoiceSchema
         : type === "z_history"
           ? zHistorySchema
-          : zSchema;
+          : type === "z_products"
+            ? zProductsSchema
+            : zSchema;
     const instructions =
       type === "invoice"
         ? invoicePrompt
         : type === "z_history"
           ? zHistoryPrompt
-          : zPrompt;
+          : type === "z_products"
+            ? zProductsPrompt
+            : zPrompt;
 
     const pdfText = isPdf ? await extractPdfText(fileBuffer) : "";
 
@@ -195,7 +199,9 @@ export async function POST(req) {
               ? "supplier_invoice"
               : type === "z_history"
                 ? "z_history_report"
-                : "z_report",
+                : type === "z_products"
+                  ? "z_product_report"
+                  : "z_report",
           strict: true,
           schema,
         },
@@ -386,11 +392,61 @@ const zHistorySchema = {
   },
 };
 
+
+const productLine = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "rawLabel",
+    "category",
+    "saleType",
+    "quantity",
+    "unitPriceTtc",
+    "salesTtc",
+    "discountsTtc",
+    "offeredQuantity",
+    "cancelledQuantity",
+    "confidence",
+  ],
+  properties: {
+    rawLabel: { type: "string" },
+    category: {
+      type: "string",
+      enum: ["Formule", "Entrée", "Plat", "Dessert", "Boisson", "Supplément", "Autre"],
+    },
+    saleType: {
+      type: "string",
+      enum: ["formula", "component", "standalone", "unknown"],
+    },
+    quantity: { type: ["number", "null"] },
+    unitPriceTtc: { type: ["number", "null"] },
+    salesTtc: { type: ["number", "null"] },
+    discountsTtc: { type: ["number", "null"] },
+    offeredQuantity: { type: ["number", "null"] },
+    cancelledQuantity: { type: ["number", "null"] },
+    confidence,
+  },
+};
+
+const zProductsSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["restaurant", "periodStart", "periodEnd", "products"],
+  properties: {
+    restaurant: field(),
+    periodStart: field(),
+    periodEnd: field(),
+    products: { type: "array", items: productLine },
+  },
+};
+
 const invoicePrompt = `Lis ce document fournisseur. Retourne uniquement le JSON demandé. documentType vaut exactement "invoice" pour une facture ou "credit_note" pour un avoir, uniquement d'après une mention explicite du document. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. category doit être l'une de: ${CATEGORIES.join(", ")}. date et dueDate au format YYYY-MM-DD. ht, vat et ttc sont les totaux en valeur positive, y compris pour un avoir. vatLines contient chaque ventilation TVA explicitement visible avec rate=taux %, ht=base HT, vat=montant TVA et ttc=HT+TVA, toujours en valeur positive. N'ajoute aucune ligne si la ventilation n'est pas lisible et n'invente jamais un taux à partir du seul total. Vérifie HT + TVA ≈ TTC.`;
 
 const zPrompt = `Lis ce Z de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. date vient uniquement du Z. ca = CA/total TTC de clôture. covers seulement s'il est indiqué. lunch et dinner seulement s'ils sont explicitement présents. vatLines contient chaque ventilation TVA explicitement imprimée sur le Z avec taux, base HT, TVA et TTC. N'invente aucune ventilation ni répartition midi/soir.`;
 
 const zHistoryPrompt = `Lis ce récapitulatif historique de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. year est l'année couverte. periodStart et periodEnd sont les dates de début et de fin du rapport au format YYYY-MM-DD. reportTotalTtc est le CA/total TTC global explicitement imprimé pour toute la période du rapport, qu'il couvre un jour, un mois ou une année. reportCovers est le nombre total de couverts explicitement imprimé pour toute la période du rapport. periods contient chaque autre total TTC explicitement imprimé par jour ou par mois : granularity vaut "day" avec date YYYY-MM-DD, ou "month" avec date YYYY-MM-01. covers est le nombre de couverts de la même période uniquement s'il est indiqué. Ne calcule pas une période en additionnant des lignes, ne transforme pas un cumul en période et n'invente aucune valeur.`;
+
+const zProductsPrompt = `Lis ce rapport détaillé de ventes de caisse. Retourne uniquement le JSON demandé. restaurant vaut exactement "Villa Valleyre" ou "La Maison du Parc" seulement si identifiable. periodStart et periodEnd sont les bornes explicitement imprimées au format YYYY-MM-DD. products contient uniquement les articles, plats, boissons, suppléments ou formules vendus explicitement listés avec leur quantité ou leur chiffre d'affaires. N'inclus jamais les moyens de paiement, remises globales, lignes de TVA, sous-totaux, totaux généraux, couverts ou simples en-têtes de rayon. rawLabel conserve le nom imprimé. category vaut Formule, Entrée, Plat, Dessert, Boisson, Supplément ou Autre. saleType vaut formula pour une formule vendue, component pour un composant explicitement inclus dans une formule, standalone pour un produit vendu directement, sinon unknown. Ne compte jamais un composant comme une vente indépendante : marque-le component. quantity, unitPriceTtc, salesTtc, discountsTtc, offeredQuantity et cancelledQuantity proviennent uniquement de valeurs explicitement imprimées ; utilise null lorsqu'une valeur est absente. Ne déduis pas une quantité à partir d'un chiffre d'affaires et d'un prix. N'invente et ne fusionne aucune ligne.`;
 
 function val(x) {
   return x && x.value != null ? String(x.value) : "";
@@ -431,6 +487,51 @@ function lines(a) {
 }
 
 function normalize(p, type) {
+  if (type === "z_products") {
+    return {
+      restaurant: val(p.restaurant),
+      periodStart: val(p.periodStart),
+      periodEnd: val(p.periodEnd),
+      products: Array.isArray(p.products)
+        ? p.products
+            .filter(
+              (item) =>
+                item &&
+                typeof item.rawLabel === "string" &&
+                item.rawLabel.trim() &&
+                (Number.isFinite(item.quantity) || Number.isFinite(item.salesTtc)),
+            )
+            .map((item) => ({
+              rawLabel: item.rawLabel.trim(),
+              category: ["Formule", "Entrée", "Plat", "Dessert", "Boisson", "Supplément", "Autre"].includes(item.category)
+                ? item.category
+                : "Autre",
+              saleType: ["formula", "component", "standalone", "unknown"].includes(item.saleType)
+                ? item.saleType
+                : "unknown",
+              quantity: Number.isFinite(item.quantity) ? item.quantity : null,
+              unitPriceTtc: Number.isFinite(item.unitPriceTtc)
+                ? Math.round(item.unitPriceTtc * 100) / 100
+                : null,
+              salesTtc: Number.isFinite(item.salesTtc)
+                ? Math.round(item.salesTtc * 100) / 100
+                : null,
+              discountsTtc: Number.isFinite(item.discountsTtc)
+                ? Math.round(item.discountsTtc * 100) / 100
+                : 0,
+              offeredQuantity: Number.isFinite(item.offeredQuantity) ? item.offeredQuantity : 0,
+              cancelledQuantity: Number.isFinite(item.cancelledQuantity) ? item.cancelledQuantity : 0,
+              confidence: conf(item),
+            }))
+        : [],
+      confidence: {
+        restaurant: conf(p.restaurant),
+        periodStart: conf(p.periodStart),
+        periodEnd: conf(p.periodEnd),
+      },
+    };
+  }
+
   if (type === "z_history") {
     const year = Number(p?.year?.value);
     return {

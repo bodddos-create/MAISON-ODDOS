@@ -777,13 +777,14 @@ export default function Home() {
           ["charges", "Charges"],
           ["historique", "Historique"],
           ["evolution-ca", "Évolution du CA"],
+          ["analyse-produits", "Analyse produits"],
           ["reservations", "Réservations"],
         ].map(([k, l]) => (
           <button
             key={k}
             className={tab === k ? "active" : ""}
             onClick={() => {
-              if (["evolution-ca", "reservations"].includes(k)) {
+              if (["evolution-ca", "analyse-produits", "reservations"].includes(k)) {
                 window.location.href = `/${k}`;
                 return;
               }
