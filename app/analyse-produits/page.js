@@ -12,9 +12,6 @@ const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value || 0));
 const number = (value) =>
   Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
-const today = new Date().toISOString().slice(0, 10);
-const monthStart = `${today.slice(0, 7)}-01`;
-
 export default function AnalyseProduitsPage() {
   const [access, setAccess] = useState({ loading: true, allowed: false });
   const [establishments, setEstablishments] = useState([]);
@@ -24,13 +21,35 @@ export default function AnalyseProduitsPage() {
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
   const [selectedArchive, setSelectedArchive] = useState("");
-  const [periodStart, setPeriodStart] = useState(monthStart);
-  const [periodEnd, setPeriodEnd] = useState(today);
+  const [periodStart, setPeriodStart] = useState("");
+  const [periodEnd, setPeriodEnd] = useState("");
   const [includeComponents, setIncludeComponents] = useState(false);
   const [ranking, setRanking] = useState("quantity");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  const resetView = useCallback(() => {
+    setSelectedEstablishment("");
+    setSelectedRun("");
+    setSelectedArchive("");
+    setPeriodStart("");
+    setPeriodEnd("");
+    setLines([]);
+    setIncludeComponents(false);
+    setRanking("quantity");
+    setBusy(false);
+    setMessage("");
+    setError("");
+  }, []);
+
+  useEffect(() => {
+    const handlePageShow = (event) => {
+      if (event.persisted) resetView();
+    };
+    window.addEventListener("pageshow", handlePageShow);
+    return () => window.removeEventListener("pageshow", handlePageShow);
+  }, [resetView]);
 
   const loadRuns = useCallback(async () => {
     const [
@@ -92,7 +111,6 @@ export default function AnalyseProduitsPage() {
     setEstablishments(estRows || []);
     setRuns(runRows || []);
     setArchivedDocuments(documents);
-    setSelectedEstablishment((current) => current || estRows?.[0]?.id || "");
   }, []);
 
   useEffect(() => {
@@ -369,7 +387,7 @@ export default function AnalyseProduitsPage() {
           <h1>Analyse produits</h1>
           <p>Classement des plats, formules et boissons à partir des Z détaillés.</p>
         </div>
-        <a href="/"><button>← Pilotage</button></a>
+        <a href="/" onClick={resetView}><button>← Pilotage</button></a>
       </header>
 
       <section>
@@ -384,6 +402,7 @@ export default function AnalyseProduitsPage() {
                 onChange={(event) => setSelectedEstablishment(event.target.value)}
                 style={{ width: "100%", padding: 11, marginTop: 6 }}
               >
+                <option value="">Choisir un établissement</option>
                 {establishments.map((establishment) => (
                   <option key={establishment.id} value={establishment.id}>
                     {establishment.name}
