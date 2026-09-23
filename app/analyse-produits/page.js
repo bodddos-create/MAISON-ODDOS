@@ -12,9 +12,6 @@ const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value || 0));
 const number = (value) =>
   Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
-const today = new Date().toISOString().slice(0, 10);
-const monthStart = `${today.slice(0, 7)}-01`;
-
 export default function AnalyseProduitsPage() {
   const [access, setAccess] = useState({ loading: true, allowed: false });
   const [establishments, setEstablishments] = useState([]);
@@ -24,9 +21,6 @@ export default function AnalyseProduitsPage() {
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
   const [selectedArchive, setSelectedArchive] = useState("");
-  const [periodStart, setPeriodStart] = useState(monthStart);
-  const [periodEnd, setPeriodEnd] = useState(today);
-  const [file, setFile] = useState(null);
   const [includeComponents, setIncludeComponents] = useState(false);
   const [ranking, setRanking] = useState("quantity");
   const [busy, setBusy] = useState(false);
@@ -232,7 +226,9 @@ export default function AnalyseProduitsPage() {
         body: form,
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Analyse impossible.");
+      if (!response.ok) {
+        throw new Error(body.details ? `${body.error} — ${body.details}` : body.error || "Analyse impossible.");
+      }
       await loadRuns();
       setSelectedRun(body.analysis_id);
       setMessage(
@@ -242,43 +238,6 @@ export default function AnalyseProduitsPage() {
       );
     } catch (analysisError) {
       setError(analysisError.message || "Analyse impossible.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function submit(event) {
-    event.preventDefault();
-    setError("");
-    setMessage("");
-    if (!file || !selectedEstablishment) {
-      setError("Choisissez le restaurant et le Z détaillé.");
-      return;
-    }
-    setBusy(true);
-    try {
-      const { data: sessionData } = await sb.auth.getSession();
-      const token = sessionData?.session?.access_token;
-      if (!token) throw new Error("Votre session a expiré.");
-      const form = new FormData();
-      form.append("file", file);
-      form.append("establishment_id", selectedEstablishment);
-      form.append("period_start", periodStart);
-      form.append("period_end", periodEnd);
-      const response = await fetch("/api/product-analysis", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-        body: form,
-      });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Analyse impossible.");
-      await loadRuns();
-      setSelectedRun(body.analysis_id);
-      setMessage(`${body.line_count} lignes produits analysées et enregistrées.`);
-      setFile(null);
-      event.currentTarget.reset();
-    } catch (submitError) {
-      setError(submitError.message || "Analyse impossible.");
     } finally {
       setBusy(false);
     }
@@ -355,53 +314,6 @@ export default function AnalyseProduitsPage() {
           >
             {busy ? "Lecture en cours…" : "Analyser ce Z archivé"}
           </button>
-        </div>
-
-        <div className="formCard" style={{ marginTop: 22 }}>
-          <h2>Importer un nouveau Z détaillé</h2>
-          <p>
-            Importez le rapport qui contient les lignes d’articles vendus. Un Z avec seulement
-            le CA et la TVA ne permet pas d’analyser les produits.
-          </p>
-          <form onSubmit={submit}>
-            <div className="grid">
-              <label>
-                Établissement
-                <select
-                  value={selectedEstablishment}
-                  onChange={(event) => setSelectedEstablishment(event.target.value)}
-                  required
-                  style={{ width: "100%", padding: 11, marginTop: 6 }}
-                >
-                  {establishments.map((establishment) => (
-                    <option key={establishment.id} value={establishment.id}>
-                      {establishment.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Début de période
-                <input type="date" value={periodStart} onChange={(event) => setPeriodStart(event.target.value)} required />
-              </label>
-              <label>
-                Fin de période
-                <input type="date" value={periodEnd} onChange={(event) => setPeriodEnd(event.target.value)} required />
-              </label>
-              <label>
-                Z détaillé (PDF ou image)
-                <input
-                  type="file"
-                  accept="application/pdf,image/*"
-                  onChange={(event) => setFile(event.target.files?.[0] || null)}
-                  required
-                />
-              </label>
-            </div>
-            <button type="submit" disabled={busy} style={{ marginTop: 16 }}>
-              {busy ? "Lecture en cours…" : "Analyser et enregistrer"}
-            </button>
-          </form>
         </div>
 
         {message && <p style={{ color: "#185c2b", fontWeight: 800 }}>{message}</p>}

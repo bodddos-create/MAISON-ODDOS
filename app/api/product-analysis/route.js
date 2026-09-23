@@ -1,3 +1,4 @@
+import { File } from "node:buffer";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
