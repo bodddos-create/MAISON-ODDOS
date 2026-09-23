@@ -12,6 +12,9 @@ const money = (value) =>
   new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value || 0));
 const number = (value) =>
   Number(value || 0).toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+const today = new Date().toISOString().slice(0, 10);
+const monthStart = `${today.slice(0, 7)}-01`;
+
 export default function AnalyseProduitsPage() {
   const [access, setAccess] = useState({ loading: true, allowed: false });
   const [establishments, setEstablishments] = useState([]);
@@ -21,6 +24,8 @@ export default function AnalyseProduitsPage() {
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
   const [selectedRun, setSelectedRun] = useState("");
   const [selectedArchive, setSelectedArchive] = useState("");
+  const [periodStart, setPeriodStart] = useState(monthStart);
+  const [periodEnd, setPeriodEnd] = useState(today);
   const [includeComponents, setIncludeComponents] = useState(false);
   const [ranking, setRanking] = useState("quantity");
   const [busy, setBusy] = useState(false);
@@ -124,18 +129,45 @@ export default function AnalyseProduitsPage() {
     () => archivedDocuments.filter((document) => document.establishment_id === selectedEstablishment),
     [archivedDocuments, selectedEstablishment],
   );
+  const periodDocuments = useMemo(
+    () =>
+      availableDocuments.filter(
+        (document) =>
+          document.kind === "Journalier" &&
+          document.date >= periodStart &&
+          document.date <= periodEnd,
+      ),
+    [availableDocuments, periodStart, periodEnd],
+  );
+  const dailyPaths = useMemo(
+    () => new Set(availableDocuments.filter((document) => document.kind === "Journalier").map((document) => document.path)),
+    [availableDocuments],
+  );
+  const periodRuns = useMemo(
+    () =>
+      runs.filter(
+        (run) =>
+          run.establishment_id === selectedEstablishment &&
+          run.period_start >= periodStart &&
+          run.period_end <= periodEnd &&
+          run.period_start === run.period_end &&
+          dailyPaths.has(run.source_document_path),
+      ),
+    [runs, selectedEstablishment, periodStart, periodEnd, dailyPaths],
+  );
 
   useEffect(() => {
+    if (selectedRun === "__period__") return;
     if (!availableRuns.some((run) => run.id === selectedRun)) {
       setSelectedRun(availableRuns[0]?.id || "");
     }
   }, [availableRuns, selectedRun]);
 
   useEffect(() => {
-    if (!availableDocuments.some((document) => document.value === selectedArchive)) {
-      setSelectedArchive(availableDocuments[0]?.value || "");
+    if (!periodDocuments.some((document) => document.value === selectedArchive)) {
+      setSelectedArchive(periodDocuments[0]?.value || "");
     }
-  }, [availableDocuments, selectedArchive]);
+  }, [periodDocuments, selectedArchive]);
 
   useEffect(() => {
     let active = true;
@@ -144,16 +176,24 @@ export default function AnalyseProduitsPage() {
       return () => { active = false; };
     }
     setError("");
+    const analysisIds =
+      selectedRun === "__period__"
+        ? periodRuns.map((run) => run.id)
+        : [selectedRun];
+    if (!analysisIds.length) {
+      setLines([]);
+      return () => { active = false; };
+    }
     sb.from("product_sales_lines")
       .select("id,analysis_id,raw_label,normalized_label,category,sale_type,quantity,unit_price_ttc,sales_ttc,discounts_ttc,offered_quantity,cancelled_quantity,confidence")
-      .eq("analysis_id", selectedRun)
+      .in("analysis_id", analysisIds)
       .then(({ data, error: queryError }) => {
         if (!active) return;
         if (queryError) setError(queryError.message);
         else setLines(data || []);
       });
     return () => { active = false; };
-  }, [selectedRun]);
+  }, [selectedRun, periodRuns]);
 
   const report = useMemo(() => {
     const grouped = new Map();
@@ -205,6 +245,68 @@ export default function AnalyseProduitsPage() {
       lowSellers,
     };
   }, [lines, includeComponents, ranking]);
+
+  async function analyzePeriod() {
+    setError("");
+    setMessage("");
+    if (!periodStart || !periodEnd || periodEnd < periodStart) {
+      setError("Vérifiez les dates de début et de fin.");
+      return;
+    }
+    if (!periodDocuments.length) {
+      setError("Aucun Z journalier archivé n’est disponible sur cette période.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { data: sessionData } = await sb.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error("Votre session a expiré.");
+
+      const pending = periodDocuments.filter((document) => !document.analyzed);
+      let analyzed = 0;
+      const failures = [];
+
+      for (let index = 0; index < pending.length; index += 2) {
+        const batch = pending.slice(index, index + 2);
+        const results = await Promise.allSettled(
+          batch.map(async (document) => {
+            const form = new FormData();
+            form.append("existing_source", document.value);
+            const response = await fetch("/api/product-analysis", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: form,
+            });
+            const body = await response.json();
+            if (!response.ok) {
+              throw new Error(`${document.date} : ${body.error || "analyse impossible"}`);
+            }
+            return body;
+          }),
+        );
+        results.forEach((result) => {
+          if (result.status === "fulfilled") analyzed += 1;
+          else failures.push(result.reason?.message || "Analyse impossible");
+        });
+        setMessage(
+          `Lecture de la période : ${Math.min(index + batch.length, pending.length)} / ${pending.length} nouveaux Z traités…`,
+        );
+      }
+
+      await loadRuns();
+      setSelectedRun("__period__");
+      const already = periodDocuments.length - pending.length;
+      setMessage(
+        `Période du ${periodStart} au ${periodEnd} : ${already + analyzed} Z regroupés${failures.length ? `, ${failures.length} en erreur` : ""}.`,
+      );
+      if (failures.length) setError(failures.slice(0, 3).join(" | "));
+    } catch (analysisError) {
+      setError(analysisError.message || "Analyse de la période impossible.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function analyzeArchived() {
     setError("");
@@ -272,8 +374,8 @@ export default function AnalyseProduitsPage() {
 
       <section>
         <div className="formCard">
-          <h2>Lire un Z déjà archivé</h2>
-          <p>Choisissez directement un PDF déjà reçu et conservé dans Maison Oddos.</p>
+          <h2>Analyser les Z déjà archivés</h2>
+          <p>Choisissez une date de départ et une date de fin. Les Z journaliers de la période seront regroupés dans un seul classement.</p>
           <div className="grid">
             <label>
               Établissement
@@ -290,30 +392,54 @@ export default function AnalyseProduitsPage() {
               </select>
             </label>
             <label>
-              Z disponible dans la base
+              Date de départ
+              <input
+                type="date"
+                value={periodStart}
+                onChange={(event) => setPeriodStart(event.target.value)}
+              />
+            </label>
+            <label>
+              Date de fin
+              <input
+                type="date"
+                value={periodEnd}
+                onChange={(event) => setPeriodEnd(event.target.value)}
+              />
+            </label>
+            <label>
+              Z de la période
               <select
                 value={selectedArchive}
                 onChange={(event) => setSelectedArchive(event.target.value)}
                 style={{ width: "100%", padding: 11, marginTop: 6 }}
               >
-                {!availableDocuments.length && <option value="">Aucun Z archivé</option>}
-                {availableDocuments.map((document) => (
+                {!periodDocuments.length && <option value="">Aucun Z archivé</option>}
+                {periodDocuments.map((document) => (
                   <option key={document.value} value={document.value}>
-                    {document.date} · {document.kind} · {document.filename}
+                    {document.date} · {document.filename}
                     {document.analyzed ? " · déjà analysé" : ""}
                   </option>
                 ))}
               </select>
             </label>
           </div>
-          <button
-            type="button"
-            onClick={analyzeArchived}
-            disabled={busy || !selectedArchive}
-            style={{ marginTop: 16 }}
-          >
-            {busy ? "Lecture en cours…" : "Analyser ce Z archivé"}
-          </button>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <button
+              type="button"
+              onClick={analyzePeriod}
+              disabled={busy || !periodDocuments.length}
+            >
+              {busy ? "Lecture en cours…" : `Analyser la période (${periodDocuments.length} Z)`}
+            </button>
+            <button
+              type="button"
+              onClick={analyzeArchived}
+              disabled={busy || !selectedArchive}
+            >
+              Analyser uniquement le Z sélectionné
+            </button>
+          </div>
         </div>
 
         {message && <p style={{ color: "#185c2b", fontWeight: 800 }}>{message}</p>}
@@ -328,7 +454,10 @@ export default function AnalyseProduitsPage() {
                 onChange={(event) => setSelectedRun(event.target.value)}
                 style={{ width: "100%", padding: 11, marginTop: 6 }}
               >
-                {!availableRuns.length && <option value="">Aucune analyse</option>}
+                <option value="__period__">
+                  Période du {periodStart} au {periodEnd} · {periodRuns.length} Z analysés
+                </option>
+                {!availableRuns.length && <option value="">Aucune analyse individuelle</option>}
                 {availableRuns.map((run) => (
                   <option key={run.id} value={run.id}>
                     {run.period_start} au {run.period_end} · {run.source_filename}
@@ -353,11 +482,15 @@ export default function AnalyseProduitsPage() {
             />
             Inclure les composants internes des formules
           </label>
-          {selected && (
+          {selectedRun === "__period__" ? (
+            <small>
+              Résultat regroupé du {periodStart} au {periodEnd} · {periodRuns.length} Z analysés
+            </small>
+          ) : selected ? (
             <small>
               Document : {selected.source_filename} · {selected.line_count} lignes reconnues
             </small>
-          )}
+          ) : null}
         </div>
 
         <div className="grid" style={{ marginTop: 22 }}>
@@ -382,7 +515,7 @@ export default function AnalyseProduitsPage() {
         <div className="formCard" style={{ marginTop: 22 }}>
           <h2>Lecture stratégique</h2>
           {!report.products.length ? (
-            <p>Sélectionnez ou importez une analyse pour afficher les résultats.</p>
+            <p>Analysez une période ou sélectionnez une analyse pour afficher les résultats.</p>
           ) : (
             <div className="grid">
               <article className="card">
