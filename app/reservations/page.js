@@ -43,6 +43,12 @@ export default function ReservationsAdmin() {
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState("default");
   const [closure, setClosure] = useState({ exception_date: "", service_scope: "all", note: "" });
+  const [commercial, setCommercial] = useState({
+    establishment_id: "", reservation_date: "", service_scope: "midi",
+    reservation_time: "12:00", reservation_type: "standard", status: "confirmed",
+    party_size: "2", customer_name: "", phone: "", email: "", notes: "",
+  });
+  const [editingNote, setEditingNote] = useState(null);
   const [teamUsers, setTeamUsers] = useState([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamForm, setTeamForm] = useState({
@@ -94,6 +100,9 @@ export default function ReservationsAdmin() {
     setSettings(results[3].data || []);
     setExceptions(results[4].data || []);
     setSelectedEstablishment((current) => current || results[1].data?.[0]?.id || "");
+    setCommercial((current) => ({
+      ...current, establishment_id: current.establishment_id || results[1].data?.[0]?.id || "",
+    }));
     setLoading(false);
   }
 
@@ -218,6 +227,70 @@ export default function ReservationsAdmin() {
   const selectedServices = services.filter((item) => item.establishment_id === selectedEstablishment);
   const selectedExceptions = exceptions.filter((item) => item.establishment_id === selectedEstablishment);
 
+  async function createCommercialReservation(event) {
+    event.preventDefault();
+    if (!isManagement || saving) return;
+    setMessage("");
+    const sameService = reservations.filter((item) =>
+      item.establishment_id === commercial.establishment_id &&
+      item.reservation_date === commercial.reservation_date &&
+      ["pending", "confirmed"].includes(item.status) &&
+      (commercial.service_scope === "midi" ? timeValue(item.reservation_time) < "17:00" : timeValue(item.reservation_time) >= "17:00"),
+    );
+    const acceptExisting = commercial.reservation_type === "privatisation" && sameService.length > 0;
+    if (acceptExisting && !window.confirm(
+      `Ce service compte déjà ${sameService.length} réservation(s). Elles resteront actives. Avez-vous vérifié ces réservations avant de bloquer le service ?`,
+    )) return;
+    setSaving(true);
+    const { data, error } = await sb.rpc("create_commercial_reservation", {
+      p_establishment_id: commercial.establishment_id,
+      p_reservation_date: commercial.reservation_date,
+      p_service_scope: commercial.service_scope,
+      p_reservation_time: commercial.reservation_time,
+      p_party_size: Number(commercial.party_size),
+      p_customer_name: commercial.customer_name.trim(),
+      p_phone: commercial.phone.trim(),
+      p_email: commercial.email.trim() || null,
+      p_notes: commercial.notes.trim() || null,
+      p_reservation_type: commercial.reservation_type,
+      p_status: commercial.status,
+      p_accept_existing: acceptExisting,
+    });
+    setSaving(false);
+    if (error) return setMessage(`Erreur : ${error.message}`);
+    reservationIds.current.add(data.id);
+    setReservations((items) => [...items, data].sort((a, b) =>
+      `${a.reservation_date} ${a.reservation_time}`.localeCompare(`${b.reservation_date} ${b.reservation_time}`),
+    ));
+    if (commercial.reservation_type === "privatisation") {
+      const { data: updatedExceptions } = await sb.from("reservation_exceptions").select("*").order("exception_date");
+      if (updatedExceptions) setExceptions(updatedExceptions);
+    }
+    setReservationEstablishment(commercial.establishment_id);
+    setCommercial((current) => ({
+      ...current, customer_name: "", phone: "", email: "", notes: "", party_size: "2",
+    }));
+    setView("reservations");
+    setFilter("upcoming");
+    setMessage(commercial.reservation_type === "privatisation"
+      ? "Privatisation enregistrée et service bloqué aux réservations en ligne."
+      : "Réservation commerciale enregistrée.");
+  }
+
+  async function saveAnnotation(event) {
+    event.preventDefault();
+    if (!isManagement || !editingNote) return;
+    setSaving(true);
+    const { data, error } = await sb.from("reservations")
+      .update({ notes: editingNote.notes.trim() || null, updated_at: new Date().toISOString() })
+      .eq("id", editingNote.id).select().single();
+    setSaving(false);
+    if (error) return setMessage(`Erreur : ${error.message}`);
+    setReservations((items) => items.map((item) => item.id === data.id ? data : item));
+    setEditingNote(null);
+    setMessage("Annotation enregistrée.");
+  }
+
   async function authenticatedTeamRequest(options = {}) {
     const { data: { session } } = await sb.auth.getSession();
     if (!session?.access_token) throw new Error("Votre session a expiré. Reconnectez-vous.");
@@ -317,8 +390,15 @@ export default function ReservationsAdmin() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       setReservations((items) => items.map((item) => (item.id === id ? body.reservation : item)));
+      if (status === "cancelled" && body.reservation.reservation_type === "privatisation") {
+        setExceptions((items) => items.filter((item) => item.reservation_id !== id));
+      }
       if (status !== "confirmed") {
-        setMessage("Réservation mise à jour.");
+        setMessage(body.reservation.reservation_type === "privatisation" && status === "cancelled"
+          ? "Privatisation annulée : le service est de nouveau disponible."
+          : "Réservation mise à jour.");
+      } else if (body.reservation.reservation_type === "privatisation") {
+        setMessage("Privatisation confirmée.");
       } else if (body.email_sent) {
         setMessage("Réservation confirmée et courriel envoyé au client.");
       } else if (body.email_reason === "no_email") {
@@ -333,7 +413,7 @@ export default function ReservationsAdmin() {
 
   async function deleteReservation(reservation) {
     const label = `${reservation.customer_name}, le ${new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR")}`;
-    if (!window.confirm(`Supprimer définitivement la réservation de ${label} ?`)) return;
+    if (!window.confirm(`Supprimer définitivement la réservation de ${label} ?${reservation.reservation_type === "privatisation" ? " Le service sera de nouveau disponible." : ""}`)) return;
     setMessage("");
     const { data: { session } } = await sb.auth.getSession();
     if (!session?.access_token) return setMessage("Votre session a expiré. Reconnectez-vous.");
@@ -349,6 +429,9 @@ export default function ReservationsAdmin() {
       const body = await response.json();
       if (!response.ok) throw new Error(body.error);
       setReservations((items) => items.filter((item) => item.id !== reservation.id));
+      if (reservation.reservation_type === "privatisation") {
+        setExceptions((items) => items.filter((item) => item.reservation_id !== reservation.id));
+      }
       setMessage("Réservation supprimée.");
     } catch (error) {
       setMessage(`Erreur : ${error.message || "suppression impossible"}`);
@@ -441,6 +524,15 @@ export default function ReservationsAdmin() {
     event.preventDefault();
     setMessage("");
     if (!closure.exception_date) return;
+    const existing = exceptions.filter((item) =>
+      item.establishment_id === selectedEstablishment && item.exception_date === closure.exception_date && item.is_closed,
+    );
+    if (existing.some((item) => item.reservation_id && (item.service_scope === closure.service_scope || closure.service_scope === "all"))) {
+      return setMessage("Ce service est lié à une privatisation. Gérez-la dans Réservations.");
+    }
+    if (existing.some((item) => item.service_scope === "all" && closure.service_scope !== "all")) {
+      return setMessage("La journée entière est déjà bloquée.");
+    }
     const { data, error } = await sb.from("reservation_exceptions").upsert({
       establishment_id: selectedEstablishment,
       exception_date: closure.exception_date,
@@ -448,9 +540,9 @@ export default function ReservationsAdmin() {
       is_closed: true,
       note: closure.note.trim() || null,
       updated_at: new Date().toISOString(),
-    }, { onConflict: "establishment_id,exception_date" }).select().single();
+    }, { onConflict: "establishment_id,exception_date,service_scope" }).select().single();
     if (error) return setMessage(`Erreur : ${error.message}`);
-    setExceptions((items) => [...items.filter((item) => item.id !== data.id && !(item.establishment_id === data.establishment_id && item.exception_date === data.exception_date)), data].sort((a, b) => a.exception_date.localeCompare(b.exception_date)));
+    setExceptions((items) => [...items.filter((item) => item.id !== data.id), data].sort((a, b) => a.exception_date.localeCompare(b.exception_date)));
     setClosure({ exception_date: "", service_scope: "all", note: "" });
     setMessage("Fermeture exceptionnelle ajoutée.");
   }
@@ -487,6 +579,7 @@ export default function ReservationsAdmin() {
       <section>
         <div className="reservationViewTabs">
           <button className={view === "reservations" ? "active" : "secondary"} onClick={() => setView("reservations")}>Réservations</button>
+          {isManagement && <button className={view === "commercial" ? "active" : "secondary"} onClick={() => setView("commercial")}>Saisie commerciale</button>}
           {isManagement && <button className={view === "settings" ? "active" : "secondary"} onClick={() => setView("settings")}>Horaires et fermetures</button>}
           {isManagement && <button className={view === "team" ? "active" : "secondary"} onClick={() => setView("team")}>Accès équipe</button>}
         </div>
@@ -515,11 +608,28 @@ export default function ReservationsAdmin() {
           {!visible.length ? <div className="formCard"><p>Aucune réservation dans cette vue.</p></div> : <div className="reservationList">
             {visible.map((reservation) => <article className="reservationCard" key={reservation.id}>
               <div className="reservationDate"><strong>{new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}</strong><span>{timeValue(reservation.reservation_time)}</span></div>
-              <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span><h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <small>{reservation.notes}</small>}</div>
-              <div className="reservationActions"><button onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>{isManagement && <button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button>}</div>
+              <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span>{reservation.reservation_type === "privatisation" && <span className="privateBadge">Privatisation · {timeValue(reservation.reservation_time) < "17:00" ? "midi" : "soir"}</span>}<h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <p className="reservationNote">{reservation.notes}</p>}{isManagement && (editingNote?.id === reservation.id ? <form className="annotationForm" onSubmit={saveAnnotation}><label>Annotation<textarea maxLength="2000" rows="3" value={editingNote.notes} onChange={(event) => setEditingNote({ ...editingNote, notes: event.target.value })} /></label><div><button disabled={saving}>Enregistrer</button><button type="button" className="secondary" onClick={() => setEditingNote(null)}>Annuler</button></div></form> : <button className="annotationButton" onClick={() => setEditingNote({ id: reservation.id, notes: reservation.notes || "" })}>{reservation.notes ? "Modifier l’annotation" : "Ajouter une annotation"}</button>)}</div>
+              <div className="reservationActions">{(isManagement || reservation.reservation_type !== "privatisation") && <><button disabled={reservation.reservation_type === "privatisation" && reservation.status === "cancelled"} onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" disabled={reservation.status === "cancelled"} onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} disabled={reservation.reservation_type === "privatisation" && reservation.status === "cancelled"} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}{isManagement && <button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button>}</div>
             </article>)}
           </div>}
-        </> : view === "settings" ? <div className="settingsLayout">
+        </> : view === "commercial" && isManagement ? <article className="closureCard commercialCard">
+          <div><span>Service commercial</span><h2>Ajouter une réservation</h2><p>Une privatisation bloque le service choisi sur la page de réservation client et apparaît dans la liste ci-dessus.</p></div>
+          <form className="commercialForm" onSubmit={createCommercialReservation}>
+            <label>Restaurant<select required value={commercial.establishment_id} onChange={(event) => setCommercial({ ...commercial, establishment_id: event.target.value })}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <label>Type<select value={commercial.reservation_type} onChange={(event) => setCommercial({ ...commercial, reservation_type: event.target.value })}><option value="standard">Réservation</option><option value="privatisation">Privatisation du service</option></select></label>
+            <label>Date<input required min={today} type="date" value={commercial.reservation_date} onChange={(event) => setCommercial({ ...commercial, reservation_date: event.target.value })} /></label>
+            <label>Service<select value={commercial.service_scope} onChange={(event) => setCommercial({ ...commercial, service_scope: event.target.value, reservation_time: event.target.value === "midi" ? "12:00" : "19:00" })}><option value="midi">Midi</option><option value="soir">Soir</option></select></label>
+            <label>Heure<input required type="time" value={commercial.reservation_time} onChange={(event) => setCommercial({ ...commercial, reservation_time: event.target.value })} /></label>
+            <label>Nombre de personnes<input required type="number" min="1" max="300" value={commercial.party_size} onChange={(event) => setCommercial({ ...commercial, party_size: event.target.value })} /></label>
+            <label>Statut<select value={commercial.status} onChange={(event) => setCommercial({ ...commercial, status: event.target.value })}><option value="confirmed">Confirmée</option><option value="pending">Option à confirmer</option></select></label>
+            <label>Nom du client ou de l’entreprise<input required minLength="2" maxLength="120" value={commercial.customer_name} onChange={(event) => setCommercial({ ...commercial, customer_name: event.target.value })} /></label>
+            <label>Téléphone<input required type="tel" minLength="8" maxLength="30" value={commercial.phone} onChange={(event) => setCommercial({ ...commercial, phone: event.target.value })} /></label>
+            <label>E-mail <small>facultatif</small><input type="email" maxLength="160" value={commercial.email} onChange={(event) => setCommercial({ ...commercial, email: event.target.value })} /></label>
+            <label className="commercialWide">Annotation<textarea rows="4" maxLength="2000" placeholder="Événement, besoins particuliers, devis, suivi commercial…" value={commercial.notes} onChange={(event) => setCommercial({ ...commercial, notes: event.target.value })} /></label>
+            {commercial.reservation_type === "privatisation" && <p className="commercialWide commercialHint">Une option à confirmer bloque aussi le service. L’annulation de cette privatisation libère le service. Les réservations déjà présentes restent visibles et doivent être traitées séparément.</p>}
+            <button disabled={saving || !commercial.establishment_id}>{saving ? "Enregistrement…" : commercial.reservation_type === "privatisation" ? "Enregistrer et bloquer le service" : "Enregistrer la réservation"}</button>
+          </form>
+        </article> : view === "settings" ? <div className="settingsLayout">
           <div className="settingsToolbar">
             <label>Restaurant<select value={selectedEstablishment} onChange={(event) => setSelectedEstablishment(event.target.value)}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label className="toggleLine"><input type="checkbox" checked={Boolean(selectedSetting.online_enabled)} onChange={(event) => changeSetting("online_enabled", event.target.checked)} /><span>Réservations en ligne ouvertes</span></label>
@@ -549,7 +659,7 @@ export default function ReservationsAdmin() {
           <article className="closureCard">
             <div><span>Fermetures exceptionnelles</span><h2>Bloquer une date</h2><p>Choisissez la journée entière, le service du midi ou celui du soir.</p></div>
             <form className="closureForm" onSubmit={addClosure}><label>Date<input required type="date" value={closure.exception_date} onChange={(event) => setClosure({ ...closure, exception_date: event.target.value })} /></label><label>Service<select value={closure.service_scope} onChange={(event) => setClosure({ ...closure, service_scope: event.target.value })}><option value="all">Journée entière</option><option value="midi">Midi</option><option value="soir">Soir</option></select></label><label>Motif <small>facultatif</small><input placeholder="Congés, privatisation…" value={closure.note} onChange={(event) => setClosure({ ...closure, note: event.target.value })} /></label><button>Ajouter la fermeture</button></form>
-            <div className="closureList">{!selectedExceptions.length ? <p>Aucune fermeture exceptionnelle enregistrée.</p> : selectedExceptions.map((item) => <div key={item.id}><b>{new Date(`${item.exception_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</b><span>{({ all: "Journée entière", midi: "Midi", soir: "Soir" })[item.service_scope || "all"]} · {item.note || "Fermé"}</span><button className="secondary" onClick={() => removeClosure(item.id)}>Supprimer</button></div>)}</div>
+            <div className="closureList">{!selectedExceptions.length ? <p>Aucune fermeture exceptionnelle enregistrée.</p> : selectedExceptions.map((item) => <div key={item.id}><b>{new Date(`${item.exception_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</b><span>{({ all: "Journée entière", midi: "Midi", soir: "Soir" })[item.service_scope || "all"]} · {item.note || "Fermé"}</span>{item.reservation_id ? <span>Gérée depuis Réservations</span> : <button className="secondary" onClick={() => removeClosure(item.id)}>Supprimer</button>}</div>)}</div>
           </article>
         </div> : <div className="settingsLayout">
           <article className="closureCard">

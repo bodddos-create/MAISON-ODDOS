@@ -375,7 +375,7 @@ export async function PATCH(request) {
     }
 
     let email = { sent: false, reason: "not_required" };
-    if (status === "confirmed") {
+    if (status === "confirmed" && reservation.reservation_type !== "privatisation") {
       const establishments = await supabaseRequest(
         config,
         `establishments?id=eq.${encodeURIComponent(reservation.establishment_id)}&select=name&limit=1`,
