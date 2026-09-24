@@ -176,7 +176,7 @@ export async function GET() {
       ),
       supabaseRequest(
         config,
-        `reservation_exceptions?exception_date=gte.${today}&is_closed=eq.true&select=establishment_id,exception_date,note&order=exception_date.asc`,
+        `reservation_exceptions?exception_date=gte.${today}&is_closed=eq.true&select=establishment_id,exception_date,service_scope,note&order=exception_date.asc`,
       ),
     ]);
     const enabledIds = new Set(
@@ -246,7 +246,7 @@ export async function POST(request) {
       ),
       supabaseRequest(
         config,
-        `reservation_exceptions?establishment_id=eq.${encodeURIComponent(establishmentId)}&exception_date=eq.${reservationDate}&is_closed=eq.true&select=id&limit=1`,
+        `reservation_exceptions?establishment_id=eq.${encodeURIComponent(establishmentId)}&exception_date=eq.${reservationDate}&is_closed=eq.true&select=service_scope`,
       ),
     ]);
     const establishment = establishments?.[0];
@@ -254,7 +254,7 @@ export async function POST(request) {
       return NextResponse.json({ error: "Restaurant introuvable." }, { status: 404 });
     }
     const setting = settings?.[0];
-    if (!setting?.online_enabled || exceptions?.length) {
+    if (!setting?.online_enabled || exceptions?.some((item) => !item.service_scope || item.service_scope === "all")) {
       return NextResponse.json(
         { error: "Le restaurant est fermé aux réservations pour cette date." },
         { status: 400 },
@@ -282,6 +282,15 @@ export async function POST(request) {
     if (!service || partySize > Number(service.max_party_size || 12)) {
       return NextResponse.json(
         { error: "Ce créneau n’est pas disponible pour ce nombre de personnes." },
+        { status: 400 },
+      );
+    }
+    if (exceptions?.some((item) =>
+      (item.service_scope === "midi" && service.label === "Déjeuner") ||
+      (item.service_scope === "soir" && service.label === "Dîner"),
+    )) {
+      return NextResponse.json(
+        { error: "Ce service est fermé aux réservations pour cette date." },
         { status: 400 },
       );
     }
