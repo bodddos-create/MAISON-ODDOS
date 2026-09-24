@@ -42,7 +42,7 @@ export default function ReservationsAdmin() {
   const [saving, setSaving] = useState(false);
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState("default");
-  const [closure, setClosure] = useState({ exception_date: "", note: "" });
+  const [closure, setClosure] = useState({ exception_date: "", service_scope: "all", note: "" });
   const [teamUsers, setTeamUsers] = useState([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamForm, setTeamForm] = useState({
@@ -444,13 +444,14 @@ export default function ReservationsAdmin() {
     const { data, error } = await sb.from("reservation_exceptions").upsert({
       establishment_id: selectedEstablishment,
       exception_date: closure.exception_date,
+      service_scope: closure.service_scope,
       is_closed: true,
       note: closure.note.trim() || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: "establishment_id,exception_date" }).select().single();
     if (error) return setMessage(`Erreur : ${error.message}`);
     setExceptions((items) => [...items.filter((item) => item.id !== data.id && !(item.establishment_id === data.establishment_id && item.exception_date === data.exception_date)), data].sort((a, b) => a.exception_date.localeCompare(b.exception_date)));
-    setClosure({ exception_date: "", note: "" });
+    setClosure({ exception_date: "", service_scope: "all", note: "" });
     setMessage("Fermeture exceptionnelle ajoutée.");
   }
 
@@ -479,7 +480,7 @@ export default function ReservationsAdmin() {
             {alertsEnabled ? "🔔 Alertes activées" : "🔔 Activer les alertes"}
           </button>
           <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
-          {isManagement && <a href="/"><button className="secondary">Pilotage</button></a>}
+          {isManagement && view !== "team" && <a href="/"><button className="secondary">← Retour au pilotage</button></a>}
           <button className="secondary" onClick={logout}>Déconnexion</button>
         </div>
       </header>
@@ -546,9 +547,9 @@ export default function ReservationsAdmin() {
           <button className="saveSchedule" disabled={saving} onClick={saveSchedule}>{saving ? "Enregistrement…" : `Enregistrer les horaires de ${names[selectedEstablishment] || "ce restaurant"}`}</button>
 
           <article className="closureCard">
-            <div><span>Fermetures exceptionnelles</span><h2>Bloquer une date</h2><p>La date ne proposera aucun créneau sur la page client.</p></div>
-            <form className="closureForm" onSubmit={addClosure}><label>Date<input required type="date" value={closure.exception_date} onChange={(event) => setClosure({ ...closure, exception_date: event.target.value })} /></label><label>Motif <small>facultatif</small><input placeholder="Congés, privatisation…" value={closure.note} onChange={(event) => setClosure({ ...closure, note: event.target.value })} /></label><button>Ajouter la fermeture</button></form>
-            <div className="closureList">{!selectedExceptions.length ? <p>Aucune fermeture exceptionnelle enregistrée.</p> : selectedExceptions.map((item) => <div key={item.id}><b>{new Date(`${item.exception_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</b><span>{item.note || "Fermé"}</span><button className="secondary" onClick={() => removeClosure(item.id)}>Supprimer</button></div>)}</div>
+            <div><span>Fermetures exceptionnelles</span><h2>Bloquer une date</h2><p>Choisissez la journée entière, le service du midi ou celui du soir.</p></div>
+            <form className="closureForm" onSubmit={addClosure}><label>Date<input required type="date" value={closure.exception_date} onChange={(event) => setClosure({ ...closure, exception_date: event.target.value })} /></label><label>Service<select value={closure.service_scope} onChange={(event) => setClosure({ ...closure, service_scope: event.target.value })}><option value="all">Journée entière</option><option value="midi">Midi</option><option value="soir">Soir</option></select></label><label>Motif <small>facultatif</small><input placeholder="Congés, privatisation…" value={closure.note} onChange={(event) => setClosure({ ...closure, note: event.target.value })} /></label><button>Ajouter la fermeture</button></form>
+            <div className="closureList">{!selectedExceptions.length ? <p>Aucune fermeture exceptionnelle enregistrée.</p> : selectedExceptions.map((item) => <div key={item.id}><b>{new Date(`${item.exception_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</b><span>{({ all: "Journée entière", midi: "Midi", soir: "Soir" })[item.service_scope || "all"]} · {item.note || "Fermé"}</span><button className="secondary" onClick={() => removeClosure(item.id)}>Supprimer</button></div>)}</div>
           </article>
         </div> : <div className="settingsLayout">
           <article className="closureCard">
