@@ -78,6 +78,7 @@ export default function Home() {
     [openingDays, setOpeningDays] = useState([]),
     [tab, setTab] = useState("direction"),
     [selectedEst, setSelectedEst] = useState("all");
+  const [commercialForecast, setCommercialForecast] = useState({ total: 0, count: 0, loading: true, error: false });
   const [entryType, setEntryType] = useState("z"),
     [personnelView, setPersonnelView] = useState("salaries"),
     [chartView, setChartView] = useState("month"),
@@ -136,6 +137,31 @@ export default function Home() {
   useEffect(() => {
     if (user) load();
   }, [user]);
+  useEffect(() => {
+    if (!user || tab !== "direction") return undefined;
+    let active = true;
+    setCommercialForecast((current) => ({ ...current, loading: true, error: false }));
+    async function refreshCommercialForecast() {
+      const { data, error } = await sb.rpc("commercial_future_total", {
+        p_establishment_id: selectedEst === "all" ? null : selectedEst,
+      }).single();
+      if (!active) return;
+      setCommercialForecast(error || !data
+        ? { total: 0, count: 0, loading: false, error: true }
+        : { total: Number(data.total_ttc || 0), count: Number(data.prestations || 0), loading: false, error: false });
+    }
+    refreshCommercialForecast();
+    const interval = window.setInterval(refreshCommercialForecast, 60000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshCommercialForecast();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [user, tab, selectedEst]);
   useEffect(() => {
     if (ests.length) {
       const id = ests[0].id;
@@ -847,6 +873,16 @@ export default function Home() {
             >
               <span style={{ color: "#fff" }}>Coût journalier</span>
               <strong style={{ color: "#fff" }}>Calcul…</strong>
+            </article>
+            <article
+              className="card"
+              style={{ background: "#e9f0e5", borderColor: "#bcd0b8", color: "#294a2c" }}
+            >
+              <span>Prestations vendues à venir</span>
+              <strong>{commercialForecast.loading ? "Chargement…" : commercialForecast.error ? "Indisponible" : euro(commercialForecast.total)}</strong>
+              {!commercialForecast.loading && !commercialForecast.error && <small style={{ color: "#426448" }}>
+                Service commercial · {commercialForecast.count} prestation{commercialForecast.count > 1 ? "s" : ""} confirmée{commercialForecast.count > 1 ? "s" : ""} · TTC
+              </small>}
             </article>
           </div>
           <div className="formCard" style={{ marginTop: 22 }}>
