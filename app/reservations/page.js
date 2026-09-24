@@ -24,6 +24,16 @@ const parisToday = () => new Intl.DateTimeFormat("en-CA", {
   day: "2-digit",
 }).format(new Date());
 const csvValue = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+const euro = (value) => new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR" }).format(Number(value || 0));
+const menuBucket = "business-documents";
+const maxMenuSize = 10 * 1024 * 1024;
+
+async function validateMenuPdf(file) {
+  if (!file) return;
+  if (file.size > maxMenuSize || file.size === 0) throw new Error("Le PDF doit faire moins de 10 Mo.");
+  const header = new TextDecoder().decode(await file.slice(0, 5).arrayBuffer());
+  if (header !== "%PDF-") throw new Error("Sélectionnez un véritable fichier PDF.");
+}
 
 export default function ReservationsAdmin() {
   const [user, setUser] = useState(undefined);
@@ -37,6 +47,8 @@ export default function ReservationsAdmin() {
   const [selectedEstablishment, setSelectedEstablishment] = useState("");
   const [reservationEstablishment, setReservationEstablishment] = useState("all");
   const [filter, setFilter] = useState("upcoming");
+  const [today, setToday] = useState(parisToday);
+  const [projectionRestaurant, setProjectionRestaurant] = useState("all");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -46,8 +58,11 @@ export default function ReservationsAdmin() {
   const [commercial, setCommercial] = useState({
     establishment_id: "", reservation_date: "", service_scope: "midi",
     reservation_time: "12:00", reservation_type: "standard", status: "confirmed",
-    party_size: "2", customer_name: "", phone: "", email: "", notes: "",
+    party_size: "2", customer_name: "", phone: "", email: "", notes: "", sold_amount: "", menu_label: "",
   });
+  const [menuFile, setMenuFile] = useState(null);
+  const [menuInputKey, setMenuInputKey] = useState(0);
+  const [editingSale, setEditingSale] = useState(null);
   const [editingNote, setEditingNote] = useState(null);
   const [teamUsers, setTeamUsers] = useState([]);
   const [teamLoading, setTeamLoading] = useState(false);
@@ -60,6 +75,16 @@ export default function ReservationsAdmin() {
   const reservationIds = useRef(new Set());
   const alertsEnabledRef = useRef(false);
   const audioContextRef = useRef(null);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setToday(parisToday()), 60000);
+    const refreshDate = () => setToday(parisToday());
+    document.addEventListener("visibilitychange", refreshDate);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshDate);
+    };
+  }, []);
 
   useEffect(() => {
     sb.auth.getUser().then(async ({ data }) => {
@@ -208,7 +233,6 @@ export default function ReservationsAdmin() {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [user, loading, names]);
-  const today = parisToday();
   const restaurantReservations = reservations.filter((reservation) => (
     reservationEstablishment === "all" ||
     reservation.establishment_id === reservationEstablishment
@@ -226,6 +250,85 @@ export default function ReservationsAdmin() {
   };
   const selectedServices = services.filter((item) => item.establishment_id === selectedEstablishment);
   const selectedExceptions = exceptions.filter((item) => item.establishment_id === selectedEstablishment);
+  const projected = reservations.filter((item) =>
+    item.reservation_date >= today && item.status === "confirmed" &&
+    item.sold_amount !== null && Number(item.sold_amount) > 0 &&
+    (projectionRestaurant === "all" || item.establishment_id === projectionRestaurant),
+  ).sort((a, b) => `${a.reservation_date} ${a.reservation_time}`.localeCompare(`${b.reservation_date} ${b.reservation_time}`));
+  const projectedTotal = projected.reduce((sum, item) => sum + Number(item.sold_amount), 0);
+  const projectedByMonth = Object.entries(projected.reduce((months, item) => {
+    const month = item.reservation_date.slice(0, 7);
+    months[month] = (months[month] || 0) + Number(item.sold_amount);
+    return months;
+  }, {}));
+
+  async function attachMenuPdf(reservationId, file, previousPath = null) {
+    await validateMenuPdf(file);
+    const path = `commercial-menus/${reservationId}/${crypto.randomUUID()}.pdf`;
+    const { error: uploadError } = await sb.storage.from(menuBucket)
+      .upload(path, file, { contentType: "application/pdf", upsert: false });
+    if (uploadError) throw new Error(`Envoi du PDF : ${uploadError.message}`);
+    const { data, error } = await sb.from("reservations")
+      .update({ menu_pdf_path: path, updated_at: new Date().toISOString() })
+      .eq("id", reservationId).select().single();
+    if (error || !data) {
+      await sb.storage.from(menuBucket).remove([path]);
+      throw new Error(error?.message || "Le PDF n’a pas pu être associé à la réservation.");
+    }
+    if (previousPath && previousPath !== path) {
+      await sb.storage.from(menuBucket).remove([previousPath]);
+    }
+    return data;
+  }
+
+  async function openMenuPdf(path) {
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    try {
+      const { data, error } = await sb.storage.from(menuBucket).createSignedUrl(path, 300);
+      if (error || !data?.signedUrl) throw new Error(error?.message || "lien impossible");
+      if (tab) tab.location.href = data.signedUrl;
+      else window.location.href = data.signedUrl;
+    } catch (error) {
+      tab?.close();
+      setMessage(`PDF indisponible : ${error.message}`);
+    }
+  }
+
+  async function saveSale(event) {
+    event.preventDefault();
+    if (!isManagement || !editingSale || saving) return;
+    const amount = editingSale.sold_amount.trim() === "" ? null : Number(editingSale.sold_amount);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0 || amount > 9999999999.99)) {
+      return setMessage("Saisissez un montant valide en euros.");
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      if (editingSale.file) await validateMenuPdf(editingSale.file);
+      const { data, error } = await sb.from("reservations")
+        .update({ sold_amount: amount, menu_label: editingSale.menu_label.trim() || null, updated_at: new Date().toISOString() })
+        .eq("id", editingSale.id).select().single();
+      if (error || !data) throw new Error(error?.message || "Mise à jour impossible.");
+      setReservations((items) => items.map((item) => item.id === data.id ? data : item));
+      let updated = data;
+      if (editingSale.file) {
+        try {
+          updated = await attachMenuPdf(data.id, editingSale.file, data.menu_pdf_path);
+        } catch (uploadError) {
+          setMessage(`Montant enregistré, mais PDF non joint : ${uploadError.message}. Réessayez ici.`);
+          return;
+        }
+      }
+      setReservations((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setEditingSale(null);
+      setMessage("Prestation mise à jour.");
+    } catch (error) {
+      setMessage(`Erreur : ${error.message}`);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function createCommercialReservation(event) {
     event.preventDefault();
@@ -241,8 +344,17 @@ export default function ReservationsAdmin() {
     if (acceptExisting && !window.confirm(
       `Ce service compte déjà ${sameService.length} réservation(s). Elles resteront actives. Avez-vous vérifié ces réservations avant de bloquer le service ?`,
     )) return;
+    const soldAmount = commercial.sold_amount.trim() === "" ? null : Number(commercial.sold_amount);
+    if (soldAmount !== null && (!Number.isFinite(soldAmount) || soldAmount < 0 || soldAmount > 9999999999.99)) {
+      return setMessage("Saisissez un montant valide en euros.");
+    }
+    try {
+      if (menuFile) await validateMenuPdf(menuFile);
+    } catch (error) {
+      return setMessage(`Erreur : ${error.message}`);
+    }
     setSaving(true);
-    const { data, error } = await sb.rpc("create_commercial_reservation", {
+    const { data, error } = await sb.rpc("create_commercial_sale", {
       p_establishment_id: commercial.establishment_id,
       p_reservation_date: commercial.reservation_date,
       p_service_scope: commercial.service_scope,
@@ -255,11 +367,25 @@ export default function ReservationsAdmin() {
       p_reservation_type: commercial.reservation_type,
       p_status: commercial.status,
       p_accept_existing: acceptExisting,
+      p_sold_amount: soldAmount,
+      p_menu_label: commercial.menu_label.trim() || null,
     });
+    if (error) {
+      setSaving(false);
+      return setMessage(`Erreur : ${error.message}`);
+    }
+    let booked = data;
+    let pdfError = "";
+    if (menuFile) {
+      try {
+        booked = await attachMenuPdf(data.id, menuFile);
+      } catch (uploadError) {
+        pdfError = uploadError.message;
+      }
+    }
     setSaving(false);
-    if (error) return setMessage(`Erreur : ${error.message}`);
     reservationIds.current.add(data.id);
-    setReservations((items) => [...items, data].sort((a, b) =>
+    setReservations((items) => [...items, booked].sort((a, b) =>
       `${a.reservation_date} ${a.reservation_time}`.localeCompare(`${b.reservation_date} ${b.reservation_time}`),
     ));
     if (commercial.reservation_type === "privatisation") {
@@ -268,13 +394,17 @@ export default function ReservationsAdmin() {
     }
     setReservationEstablishment(commercial.establishment_id);
     setCommercial((current) => ({
-      ...current, customer_name: "", phone: "", email: "", notes: "", party_size: "2",
+      ...current, customer_name: "", phone: "", email: "", notes: "", party_size: "2", sold_amount: "", menu_label: "",
     }));
+    setMenuFile(null);
+    setMenuInputKey((key) => key + 1);
     setView("reservations");
     setFilter("upcoming");
-    setMessage(commercial.reservation_type === "privatisation"
-      ? "Privatisation enregistrée et service bloqué aux réservations en ligne."
-      : "Réservation commerciale enregistrée.");
+    setMessage(pdfError
+      ? `Réservation enregistrée, mais le PDF n’a pas été joint : ${pdfError}. Ajoutez-le depuis la réservation.`
+      : commercial.reservation_type === "privatisation"
+        ? "Privatisation enregistrée et service bloqué aux réservations en ligne."
+        : "Réservation commerciale enregistrée.");
   }
 
   async function saveAnnotation(event) {
@@ -432,6 +562,13 @@ export default function ReservationsAdmin() {
       if (reservation.reservation_type === "privatisation") {
         setExceptions((items) => items.filter((item) => item.reservation_id !== reservation.id));
       }
+      if (reservation.menu_pdf_path) {
+        const { error: documentError } = await sb.storage.from(menuBucket).remove([reservation.menu_pdf_path]);
+        if (documentError) {
+          setMessage("Réservation supprimée, mais le PDF n’a pas pu être effacé. Contactez la direction.");
+          return;
+        }
+      }
       setMessage("Réservation supprimée.");
     } catch (error) {
       setMessage(`Erreur : ${error.message || "suppression impossible"}`);
@@ -579,7 +716,7 @@ export default function ReservationsAdmin() {
       <section>
         <div className="reservationViewTabs">
           <button className={view === "reservations" ? "active" : "secondary"} onClick={() => setView("reservations")}>Réservations</button>
-          {isManagement && <button className={view === "commercial" ? "active" : "secondary"} onClick={() => setView("commercial")}>Saisie commerciale</button>}
+          {isManagement && <button className={`commercialTab ${view === "commercial" ? "active" : ""}`} onClick={() => setView("commercial")}>Saisie commerciale</button>}
           {isManagement && <button className={view === "settings" ? "active" : "secondary"} onClick={() => setView("settings")}>Horaires et fermetures</button>}
           {isManagement && <button className={view === "team" ? "active" : "secondary"} onClick={() => setView("team")}>Accès équipe</button>}
         </div>
@@ -608,11 +745,18 @@ export default function ReservationsAdmin() {
           {!visible.length ? <div className="formCard"><p>Aucune réservation dans cette vue.</p></div> : <div className="reservationList">
             {visible.map((reservation) => <article className="reservationCard" key={reservation.id}>
               <div className="reservationDate"><strong>{new Date(`${reservation.reservation_date}T12:00:00`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}</strong><span>{timeValue(reservation.reservation_time)}</span></div>
-              <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span>{reservation.reservation_type === "privatisation" && <span className="privateBadge">Privatisation · {timeValue(reservation.reservation_time) < "17:00" ? "midi" : "soir"}</span>}<h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <p className="reservationNote">{reservation.notes}</p>}{isManagement && (editingNote?.id === reservation.id ? <form className="annotationForm" onSubmit={saveAnnotation}><label>Annotation<textarea maxLength="2000" rows="3" value={editingNote.notes} onChange={(event) => setEditingNote({ ...editingNote, notes: event.target.value })} /></label><div><button disabled={saving}>Enregistrer</button><button type="button" className="secondary" onClick={() => setEditingNote(null)}>Annuler</button></div></form> : <button className="annotationButton" onClick={() => setEditingNote({ id: reservation.id, notes: reservation.notes || "" })}>{reservation.notes ? "Modifier l’annotation" : "Ajouter une annotation"}</button>)}</div>
+              <div className="reservationIdentity"><span className={`status status-${reservation.status}`}>{statusLabels[reservation.status]}</span>{reservation.reservation_type === "privatisation" && <span className="privateBadge">Privatisation · {timeValue(reservation.reservation_time) < "17:00" ? "midi" : "soir"}</span>}<h3>{reservation.customer_name} · {reservation.party_size} pers.</h3><p><b>{names[reservation.establishment_id] || "Restaurant"}</b></p><p>{reservation.phone}{reservation.email ? ` · ${reservation.email}` : ""}</p>{reservation.notes && <p className="reservationNote">{reservation.notes}</p>}{isManagement && (editingNote?.id === reservation.id ? <form className="annotationForm" onSubmit={saveAnnotation}><label>Annotation<textarea maxLength="2000" rows="3" value={editingNote.notes} onChange={(event) => setEditingNote({ ...editingNote, notes: event.target.value })} /></label><div><button disabled={saving}>Enregistrer</button><button type="button" className="secondary" onClick={() => setEditingNote(null)}>Annuler</button></div></form> : <button className="annotationButton" onClick={() => setEditingNote({ id: reservation.id, notes: reservation.notes || "" })}>{reservation.notes ? "Modifier l’annotation" : "Ajouter une annotation"}</button>)}{isManagement && <div className="saleDetails">{reservation.menu_label && <span className="menuLabel">{reservation.menu_label}</span>}<b>{reservation.sold_amount !== null && reservation.sold_amount !== undefined ? `${euro(reservation.sold_amount)} TTC` : "Montant non renseigné"}</b>{reservation.menu_pdf_path && <button className="secondary" onClick={() => openMenuPdf(reservation.menu_pdf_path)}>Ouvrir le menu PDF ↗</button>}{editingSale?.id === reservation.id ? <form className="saleEditForm" onSubmit={saveSale}><label>Type de menu vendu<input maxLength="160" placeholder="Ex. Menu à 39 €" value={editingSale.menu_label} onChange={(event) => setEditingSale({ ...editingSale, menu_label: event.target.value })} /></label><label>Montant vendu TTC (€)<input type="number" min="0" max="9999999999.99" step="0.01" value={editingSale.sold_amount} onChange={(event) => setEditingSale({ ...editingSale, sold_amount: event.target.value })} /></label><label>Menu vendu en PDF <small>10 Mo maximum</small><input type="file" accept="application/pdf,.pdf" onChange={(event) => setEditingSale({ ...editingSale, file: event.target.files?.[0] || null })} /></label><div><button disabled={saving}>{saving ? "Enregistrement…" : "Enregistrer"}</button><button type="button" className="secondary" onClick={() => setEditingSale(null)}>Annuler</button></div></form> : <button className="annotationButton" onClick={() => setEditingSale({ id: reservation.id, sold_amount: reservation.sold_amount === null || reservation.sold_amount === undefined ? "" : String(reservation.sold_amount), menu_label: reservation.menu_label || "", file: null })}>Modifier montant / PDF</button>}</div>}</div>
               <div className="reservationActions">{(isManagement || reservation.reservation_type !== "privatisation") && <><button disabled={reservation.reservation_type === "privatisation" && reservation.status === "cancelled"} onClick={() => changeStatus(reservation.id, "confirmed")}>Confirmer</button><button className="secondary" disabled={reservation.status === "cancelled"} onClick={() => changeStatus(reservation.id, "cancelled")}>Annuler</button><select value={reservation.status} disabled={reservation.reservation_type === "privatisation" && reservation.status === "cancelled"} onChange={(event) => changeStatus(reservation.id, event.target.value)}>{Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></>}{isManagement && <button className="dangerButton" onClick={() => deleteReservation(reservation)}>Supprimer</button>}</div>
             </article>)}
           </div>}
-        </> : view === "commercial" && isManagement ? <article className="closureCard commercialCard">
+        </> : view === "commercial" && isManagement ? <div className="settingsLayout">
+          <article className="closureCard commercialProjection">
+            <div><span>Direction commerciale</span><h2>Prestations vendues à venir</h2><p>Seules les prestations confirmées et chiffrées entrent dans ce total. Elles en sortent automatiquement le lendemain de leur date.</p></div>
+            <label>Restaurant<select value={projectionRestaurant} onChange={(event) => setProjectionRestaurant(event.target.value)}><option value="all">Tous les restaurants</option>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+            <div className="projectionSummary"><div><span>Montant à réaliser</span><strong>{euro(projectedTotal)}</strong><small>{projected.length} prestation{projected.length > 1 ? "s" : ""} confirmée{projected.length > 1 ? "s" : ""}</small></div><div><span>Répartition par mois</span>{projectedByMonth.length ? projectedByMonth.map(([month, amount]) => <p key={month}><b>{new Date(`${month}-01T12:00:00`).toLocaleDateString("fr-FR", { month: "long", year: "numeric" })}</b><strong>{euro(amount)}</strong></p>) : <p>Aucune prestation chiffrée à venir.</p>}</div></div>
+            {projected.length > 0 && <div className="projectionList">{projected.map((item) => <div key={item.id}><span>{new Date(`${item.reservation_date}T12:00:00`).toLocaleDateString("fr-FR", { day: "numeric", month: "long" })} · {names[item.establishment_id]}</span><b>{item.customer_name}{item.menu_label ? ` · ${item.menu_label}` : ""}</b><strong>{euro(item.sold_amount)}</strong></div>)}</div>}
+          </article>
+          <article className="closureCard commercialCard">
           <div><span>Service commercial</span><h2>Ajouter une réservation</h2><p>Une privatisation bloque le service choisi sur la page de réservation client et apparaît dans la liste ci-dessus.</p></div>
           <form className="commercialForm" onSubmit={createCommercialReservation}>
             <label>Restaurant<select required value={commercial.establishment_id} onChange={(event) => setCommercial({ ...commercial, establishment_id: event.target.value })}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
@@ -625,11 +769,15 @@ export default function ReservationsAdmin() {
             <label>Nom du client ou de l’entreprise<input required minLength="2" maxLength="120" value={commercial.customer_name} onChange={(event) => setCommercial({ ...commercial, customer_name: event.target.value })} /></label>
             <label>Téléphone<input required type="tel" minLength="8" maxLength="30" value={commercial.phone} onChange={(event) => setCommercial({ ...commercial, phone: event.target.value })} /></label>
             <label>E-mail <small>facultatif</small><input type="email" maxLength="160" value={commercial.email} onChange={(event) => setCommercial({ ...commercial, email: event.target.value })} /></label>
+            <label>Type de menu vendu <small>facultatif</small><input maxLength="160" placeholder="Ex. Menu à 39 €" value={commercial.menu_label} onChange={(event) => setCommercial({ ...commercial, menu_label: event.target.value })} /></label>
+            <label>Montant vendu TTC (€) <small>facultatif</small><input type="number" min="0" max="9999999999.99" step="0.01" placeholder="Ex. 2500,00" value={commercial.sold_amount} onChange={(event) => setCommercial({ ...commercial, sold_amount: event.target.value })} /></label>
+            <label>Menu vendu en PDF <small>facultatif · 10 Mo maximum</small><input key={menuInputKey} type="file" accept="application/pdf,.pdf" onChange={(event) => setMenuFile(event.target.files?.[0] || null)} /></label>
             <label className="commercialWide">Annotation<textarea rows="4" maxLength="2000" placeholder="Événement, besoins particuliers, devis, suivi commercial…" value={commercial.notes} onChange={(event) => setCommercial({ ...commercial, notes: event.target.value })} /></label>
             {commercial.reservation_type === "privatisation" && <p className="commercialWide commercialHint">Une option à confirmer bloque aussi le service. L’annulation de cette privatisation libère le service. Les réservations déjà présentes restent visibles et doivent être traitées séparément.</p>}
             <button disabled={saving || !commercial.establishment_id}>{saving ? "Enregistrement…" : commercial.reservation_type === "privatisation" ? "Enregistrer et bloquer le service" : "Enregistrer la réservation"}</button>
           </form>
-        </article> : view === "settings" ? <div className="settingsLayout">
+          </article>
+        </div> : view === "settings" ? <div className="settingsLayout">
           <div className="settingsToolbar">
             <label>Restaurant<select value={selectedEstablishment} onChange={(event) => setSelectedEstablishment(event.target.value)}>{establishments.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
             <label className="toggleLine"><input type="checkbox" checked={Boolean(selectedSetting.online_enabled)} onChange={(event) => changeSetting("online_enabled", event.target.checked)} /><span>Réservations en ligne ouvertes</span></label>
