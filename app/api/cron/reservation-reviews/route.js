@@ -8,6 +8,12 @@ const reviewLinks = {
   "villa valleyre": "https://g.page/r/CYbOL80GA5JOEBM/review",
 };
 
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  })[character]);
+}
+
 function parisDate(offsetDays = 0) {
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
@@ -40,6 +46,8 @@ async function sendReviewEmail(reservation, name, link) {
   const date = new Date(`${reservation.reservation_date}T12:00:00Z`).toLocaleDateString("fr-FR", {
     timeZone: "Europe/Paris", day: "numeric", month: "long", year: "numeric",
   });
+  const events = "À Villa Valleyre à Mios ou à La Maison du Parc à Salles, nous organisons mariages, réceptions privées, anniversaires, séminaires et événements professionnels. Chaque réception est pensée sur mesure pour offrir à vos invités une expérience unique et inoubliable.";
+  const contact = "Caroline se fera un plaisir de vous accompagner dans votre événement : 06 98 41 37 25.";
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -51,7 +59,16 @@ async function sendReviewEmail(reservation, name, link) {
       from: process.env.RESERVATION_FROM || "Réservations Maison Oddos <factures@reception.oddos.eu>",
       to: [reservation.email],
       subject: `Merci de votre visite — ${name}`,
-      text: `Bonjour ${reservation.customer_name},\n\nMerci pour votre visite à ${name} le ${date}. Nous espérons que vous avez passé un agréable moment avec nous.\n\nSi vous souhaitez partager votre expérience, vous pouvez laisser un avis sincère sur Google :\n${link}\n\nVotre retour nous aide à progresser et à faire découvrir notre restaurant.\n\nAu plaisir de vous recevoir à nouveau,\nL’équipe de ${name}`,
+      text: `Bonjour ${reservation.customer_name},\n\nMerci pour votre visite à ${name} le ${date}. Nous espérons que vous avez passé un agréable moment avec nous.\n\nSi vous souhaitez partager votre expérience, vous pouvez laisser un avis sincère sur Google :\n${link}\n\nVotre retour nous aide à progresser et à faire découvrir notre restaurant.\n\n${events}\n\n${contact}\n\nAu plaisir de vous recevoir à nouveau,\nL’équipe de ${name}`,
+      html: `<div style="font-family:Arial,sans-serif;line-height:1.6;color:#263026;max-width:600px">
+        <p>Bonjour ${escapeHtml(reservation.customer_name)},</p>
+        <p>Merci pour votre visite à ${escapeHtml(name)} le ${escapeHtml(date)}. Nous espérons que vous avez passé un agréable moment avec nous.</p>
+        <p>Si vous souhaitez partager votre expérience, vous pouvez <a href="${link}">laisser un avis sincère sur Google</a>.</p>
+        <p>Votre retour nous aide à progresser et à faire découvrir notre restaurant.</p>
+        <p>${events}</p>
+        <p>Caroline se fera un plaisir de vous accompagner dans votre événement : <a href="tel:+33698413725">06 98 41 37 25</a>.</p>
+        <p>Au plaisir de vous recevoir à nouveau,<br>L’équipe de ${escapeHtml(name)}</p>
+      </div>`,
     }),
     cache: "no-store",
   });
