@@ -480,7 +480,7 @@ export default function ReservationsAdmin() {
             {alertsEnabled ? "🔔 Alertes activées" : "🔔 Activer les alertes"}
           </button>
           <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
-          {isManagement && <a href="/"><button className="secondary">Pilotage</button></a>}
+          {isManagement && view !== "team" && <a href="/"><button className="secondary">← Retour au pilotage</button></a>}
           <button className="secondary" onClick={logout}>Déconnexion</button>
         </div>
       </header>
