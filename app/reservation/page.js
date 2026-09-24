@@ -14,11 +14,6 @@ const timeToMinutes = (value) => {
 const timeLabel = (value) => String(value).slice(0, 5).replace(":", "h");
 const nextAvailableDate = (services, exceptions, establishmentId, daysAhead = 180) => {
   const start = new Date(`${today()}T12:00:00`);
-  const closedDates = new Set(
-    exceptions
-      .filter((item) => item.establishment_id === establishmentId)
-      .map((item) => item.exception_date),
-  );
   for (let offset = 0; offset <= daysAhead; offset += 1) {
     const candidate = new Date(start);
     candidate.setDate(start.getDate() + offset);
@@ -26,11 +21,17 @@ const nextAvailableDate = (services, exceptions, establishmentId, daysAhead = 18
     local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
     const date = local.toISOString().slice(0, 10);
     if (
-      !closedDates.has(date) &&
       services.some(
         (service) =>
           service.establishment_id === establishmentId &&
-          Number(service.weekday) === candidate.getDay(),
+          Number(service.weekday) === candidate.getDay() &&
+          !exceptions.some((item) =>
+            item.establishment_id === establishmentId &&
+            item.exception_date === date &&
+            (item.service_scope === "all" || !item.service_scope ||
+              (item.service_scope === "midi" && service.label === "Déjeuner") ||
+              (item.service_scope === "soir" && service.label === "Dîner")),
+          ),
       )
     ) {
       return date;
@@ -81,14 +82,18 @@ export default function ReservationPage() {
 
   const services = useMemo(() => {
     if (!form.reservation_date) return [];
-    if (data.exceptions.some(
-      (item) => item.establishment_id === form.establishment_id && item.exception_date === form.reservation_date,
-    )) return [];
     const weekday = new Date(`${form.reservation_date}T12:00:00`).getDay();
     return data.services.filter(
       (service) =>
         service.establishment_id === form.establishment_id &&
-        Number(service.weekday) === weekday,
+        Number(service.weekday) === weekday &&
+        !data.exceptions.some((item) =>
+          item.establishment_id === form.establishment_id &&
+          item.exception_date === form.reservation_date &&
+          (item.service_scope === "all" || !item.service_scope ||
+            (item.service_scope === "midi" && service.label === "Déjeuner") ||
+            (item.service_scope === "soir" && service.label === "Dîner")),
+        ),
     );
   }, [data.services, data.exceptions, form.establishment_id, form.reservation_date]);
 
