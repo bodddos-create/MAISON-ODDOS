@@ -208,6 +208,18 @@ export default function ReservationPage() {
             Votre demande sera contrôlée par notre équipe. Vous recevrez ensuite
             la confirmation définitive du restaurant.
           </p>
+          <div className="bookingEvents">
+            <p>
+              À Villa Valleyre à Mios ou à La Maison du Parc à Salles, nous organisons
+              mariages, réceptions privées, anniversaires, séminaires et événements
+              professionnels. Chaque réception est pensée sur mesure pour offrir à vos
+              invités une expérience unique et inoubliable.
+            </p>
+            <p>
+              Caroline se fera un plaisir de vous accompagner dans votre événement :{" "}
+              <a href="tel:+33698413725">06 98 41 37 25</a>.
+            </p>
+          </div>
         </div>
         <div className="bookingFormCard">
           {loading ? (
