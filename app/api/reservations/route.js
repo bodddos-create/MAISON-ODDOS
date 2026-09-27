@@ -102,6 +102,49 @@ function minutes(value) {
   return hours * 60 + mins;
 }
 
+
+function normalizeResendStatus(lastEvent) {
+  const event = String(lastEvent || "").toLowerCase();
+  if (["delivered", "opened", "clicked"].includes(event)) return "delivered";
+  if (["bounced", "complained", "suppressed", "failed"].includes(event)) return event;
+  if (event === "delivery_delayed") return "sending";
+  return "sent";
+}
+
+async function refreshConfirmationStatus(config, reservation) {
+  if (!config.resendKey) throw new Error("RESEND_API_KEY absente");
+  if (!reservation.confirmation_email_id) {
+    throw new Error("Aucun identifiant Resend enregistré pour ce courriel");
+  }
+
+  const response = await fetch(
+    `https://api.resend.com/emails/${encodeURIComponent(reservation.confirmation_email_id)}`,
+    {
+      headers: { Authorization: `Bearer ${config.resendKey}` },
+      cache: "no-store",
+    },
+  );
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(providerMessage(raw, response.status).error);
+  }
+
+  const provider = JSON.parse(raw);
+  const status = normalizeResendStatus(provider.last_event);
+  const tracking = {
+    confirmation_email_status: status,
+    confirmation_email_error:
+      ["bounced", "complained", "suppressed", "failed"].includes(status)
+        ? `Resend : ${provider.last_event}`
+        : null,
+    ...(status === "delivered" && !reservation.confirmation_email_delivered_at
+      ? { confirmation_email_delivered_at: new Date().toISOString() }
+      : {}),
+  };
+  await updateEmailTracking(config, reservation.id, tracking);
+  return { status, tracking, lastEvent: provider.last_event || null };
+}
+
 async function sendAcknowledgement(config, reservation, restaurantName) {
   if (!reservation?.email) {
     return { sent: false, reason: "no_email", status: null };
@@ -465,11 +508,13 @@ export async function PATCH(request) {
     const status = String(body.status || "");
     const action = String(body.action || "");
     const resendOnly = action === "resend_confirmation";
+    const refreshOnly = action === "refresh_confirmation_status";
+    const actionOnly = resendOnly || refreshOnly;
 
     if (
       !/^[0-9a-f-]{36}$/i.test(id) ||
-      (!resendOnly && !allowedStatuses.has(status)) ||
-      (action && !resendOnly)
+      (!actionOnly && !allowedStatuses.has(status)) ||
+      (action && !actionOnly)
     ) {
       return NextResponse.json({ error: "Mise à jour invalide." }, { status: 400 });
     }
@@ -484,13 +529,13 @@ export async function PATCH(request) {
       return NextResponse.json({ error: "Réservation introuvable." }, { status: 404 });
     }
 
-    if (resendOnly && current.status !== "confirmed") {
+    if (actionOnly && current.status !== "confirmed") {
       return NextResponse.json(
         { error: "La réservation doit être confirmée avant de renvoyer le courriel." },
         { status: 400 },
       );
     }
-    if (resendOnly && current.reservation_type === "privatisation") {
+    if (actionOnly && current.reservation_type === "privatisation") {
       return NextResponse.json(
         { error: "Le renvoi automatique n’est pas prévu pour une privatisation." },
         { status: 400 },
@@ -498,6 +543,19 @@ export async function PATCH(request) {
     }
 
     let reservation = current;
+
+    if (refreshOnly) {
+      const refreshed = await refreshConfirmationStatus(config, reservation);
+      reservation = { ...reservation, ...refreshed.tracking };
+      return NextResponse.json({
+        ok: true,
+        reservation,
+        email_status: refreshed.status,
+        email_last_event: refreshed.lastEvent,
+        refreshed: true,
+      });
+    }
+
     if (!resendOnly) {
       const updatedRows = await userSupabaseRequest(
         config,
