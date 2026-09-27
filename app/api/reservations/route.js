@@ -56,6 +56,38 @@ async function userSupabaseRequest(config, token, path, options = {}) {
   return body;
 }
 
+
+async function updateEmailTracking(config, reservationId, fields) {
+  await supabaseRequest(
+    config,
+    `reservations?id=eq.${encodeURIComponent(reservationId)}`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify(fields),
+    },
+  );
+}
+
+function providerMessage(raw, status) {
+  try {
+    const body = JSON.parse(raw);
+    return {
+      id: body?.id || null,
+      error: String(
+        body?.message ||
+        body?.error?.message ||
+        `Resend ${status}`,
+      ).slice(0, 500),
+    };
+  } catch {
+    return {
+      id: null,
+      error: `Resend ${status}: ${String(raw || "").slice(0, 400)}`,
+    };
+  }
+}
+
 function parisToday() {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Paris",
@@ -71,7 +103,25 @@ function minutes(value) {
 }
 
 async function sendAcknowledgement(config, reservation, restaurantName) {
-  if (!config.resendKey || !reservation.email) return;
+  if (!reservation?.email) {
+    return { sent: false, reason: "no_email", status: null };
+  }
+
+  const attemptedAt = new Date().toISOString();
+  await updateEmailTracking(config, reservation.id, {
+    acknowledgement_email_status: "sending",
+    acknowledgement_email_error: null,
+  });
+
+  if (!config.resendKey) {
+    const error = "RESEND_API_KEY absente";
+    await updateEmailTracking(config, reservation.id, {
+      acknowledgement_email_status: "failed",
+      acknowledgement_email_error: error,
+    });
+    return { sent: false, reason: "configuration", status: "failed", error };
+  }
+
   const formattedDate = new Date(
     `${reservation.reservation_date}T12:00:00Z`,
   ).toLocaleDateString("fr-FR", {
@@ -81,29 +131,82 @@ async function sendAcknowledgement(config, reservation, restaurantName) {
     month: "long",
     year: "numeric",
   });
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.resendKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from:
-        process.env.RESERVATION_FROM ||
-        "Réservations Maison Oddos <factures@reception.oddos.eu>",
-      to: [reservation.email],
-      subject: `Demande de réservation reçue — ${restaurantName}`,
-      text: `Bonjour ${reservation.customer_name},\n\nNous avons bien reçu votre demande pour ${restaurantName}, le ${formattedDate} à ${String(reservation.reservation_time).slice(0, 5)}, pour ${reservation.party_size} personne${reservation.party_size > 1 ? "s" : ""}.\n\nRéférence : ${reservation.confirmation_code}\n\nVotre réservation est en attente de confirmation par le restaurant.\n\nÀ très bientôt,\nMaison Oddos`,
-    }),
-    cache: "no-store",
-  });
-  if (!response.ok) console.error("reservation email", response.status, await response.text());
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.resendKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `reservation-received-${reservation.id}`,
+      },
+      body: JSON.stringify({
+        from:
+          process.env.RESERVATION_FROM ||
+          "Réservations Maison Oddos <factures@reception.oddos.eu>",
+        to: [reservation.email],
+        subject: `Demande de réservation reçue — ${restaurantName}`,
+        text: `Bonjour ${reservation.customer_name},\n\nNous avons bien reçu votre demande pour ${restaurantName}, le ${formattedDate} à ${String(reservation.reservation_time).slice(0, 5)}, pour ${reservation.party_size} personne${reservation.party_size > 1 ? "s" : ""}.\n\nRéférence : ${reservation.confirmation_code}\n\nVotre réservation est en attente de confirmation par le restaurant.\n\nÀ très bientôt,\nMaison Oddos`,
+      }),
+      cache: "no-store",
+    });
+    const raw = await response.text();
+    const provider = providerMessage(raw, response.status);
+    if (!response.ok) throw new Error(provider.error);
+
+    const tracking = {
+      acknowledgement_email_status: "sent",
+      acknowledgement_email_id: provider.id,
+      acknowledgement_email_sent_at: attemptedAt,
+      acknowledgement_email_error: null,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: true, status: "sent", id: provider.id, tracking };
+  } catch (error) {
+    const message = String(error?.message || error).slice(0, 500);
+    console.error("reservation acknowledgement email", reservation.id, message);
+    const tracking = {
+      acknowledgement_email_status: "failed",
+      acknowledgement_email_error: message,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: false, reason: "send_error", status: "failed", error: message, tracking };
+  }
 }
 
-async function sendConfirmation(config, reservation, restaurantName) {
-  if (!config.resendKey || !reservation.email) {
-    return { sent: false, reason: reservation.email ? "configuration" : "no_email" };
+async function sendConfirmation(config, reservation, restaurantName, { force = false } = {}) {
+  const attemptedAt = new Date().toISOString();
+  const attempt = Number(reservation.confirmation_email_attempts || 0) + 1;
+  const baseTracking = {
+    confirmation_email_status: "sending",
+    confirmation_email_error: null,
+    confirmation_email_last_attempt_at: attemptedAt,
+    confirmation_email_attempts: attempt,
+  };
+  await updateEmailTracking(config, reservation.id, baseTracking);
+
+  if (!reservation.email) {
+    const error = "Adresse e-mail absente";
+    const tracking = {
+      ...baseTracking,
+      confirmation_email_status: "failed",
+      confirmation_email_error: error,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: false, reason: "no_email", status: "failed", error, tracking };
   }
+
+  if (!config.resendKey) {
+    const error = "RESEND_API_KEY absente";
+    const tracking = {
+      ...baseTracking,
+      confirmation_email_status: "failed",
+      confirmation_email_error: error,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: false, reason: "configuration", status: "failed", error, tracking };
+  }
+
   const formattedDate = new Date(
     `${reservation.reservation_date}T12:00:00Z`,
   ).toLocaleDateString("fr-FR", {
@@ -113,20 +216,24 @@ async function sendConfirmation(config, reservation, restaurantName) {
     month: "long",
     year: "numeric",
   });
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.resendKey}`,
-      "Content-Type": "application/json",
-      "Idempotency-Key": `reservation-confirmed-${reservation.id}`,
-    },
-    body: JSON.stringify({
-      from:
-        process.env.RESERVATION_FROM ||
-        "Réservations Maison Oddos <factures@reception.oddos.eu>",
-      to: [reservation.email],
-      subject: `Réservation confirmée — ${restaurantName}`,
-      text: `Bonjour ${reservation.customer_name},
+
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.resendKey}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": force
+          ? `reservation-confirmed-${reservation.id}-${crypto.randomUUID()}`
+          : `reservation-confirmed-${reservation.id}`,
+      },
+      body: JSON.stringify({
+        from:
+          process.env.RESERVATION_FROM ||
+          "Réservations Maison Oddos <factures@reception.oddos.eu>",
+        to: [reservation.email],
+        subject: `Réservation confirmée — ${restaurantName}`,
+        text: `Bonjour ${reservation.customer_name},
 
 Votre réservation est confirmée.
 
@@ -140,24 +247,34 @@ Nous avons hâte de vous accueillir.
 
 À très bientôt,
 Maison Oddos`,
-    }),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    const responseText = await response.text();
-    console.error("reservation confirmation email", response.status, responseText);
-    let details = `Resend ${response.status}`;
-    try {
-      const providerError = JSON.parse(responseText);
-      details = String(
-        providerError?.message ||
-        providerError?.error?.message ||
-        details,
-      ).slice(0, 240);
-    } catch {}
-    return { sent: false, reason: "send_error", details };
+      }),
+      cache: "no-store",
+    });
+
+    const raw = await response.text();
+    const provider = providerMessage(raw, response.status);
+    if (!response.ok) throw new Error(provider.error);
+
+    const tracking = {
+      ...baseTracking,
+      confirmation_email_status: "sent",
+      confirmation_email_id: provider.id,
+      confirmation_email_sent_at: attemptedAt,
+      confirmation_email_error: null,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: true, status: "sent", id: provider.id, tracking };
+  } catch (error) {
+    const message = String(error?.message || error).slice(0, 500);
+    console.error("reservation confirmation email", reservation.id, message);
+    const tracking = {
+      ...baseTracking,
+      confirmation_email_status: "failed",
+      confirmation_email_error: message,
+    };
+    await updateEmailTracking(config, reservation.id, tracking);
+    return { sent: false, reason: "send_error", status: "failed", error: message, tracking };
   }
-  return { sent: true };
 }
 
 export async function GET() {
@@ -314,9 +431,12 @@ export async function POST(request) {
       }),
     });
     const reservation = rows?.[0];
-    await sendAcknowledgement(config, reservation, establishment.name);
+    const acknowledgement = await sendAcknowledgement(config, reservation, establishment.name);
     return NextResponse.json({
       ok: true,
+      email_sent: acknowledgement.sent,
+      email_status: acknowledgement.status || null,
+      email_error: acknowledgement.error || null,
       confirmation_code: confirmationCode,
       restaurant: establishment.name,
     });
@@ -343,7 +463,14 @@ export async function PATCH(request) {
     const body = await request.json();
     const id = String(body.id || "");
     const status = String(body.status || "");
-    if (!/^[0-9a-f-]{36}$/i.test(id) || !allowedStatuses.has(status)) {
+    const action = String(body.action || "");
+    const resendOnly = action === "resend_confirmation";
+
+    if (
+      !/^[0-9a-f-]{36}$/i.test(id) ||
+      (!resendOnly && !allowedStatuses.has(status)) ||
+      (action && !resendOnly)
+    ) {
       return NextResponse.json({ error: "Mise à jour invalide." }, { status: 400 });
     }
 
@@ -352,30 +479,51 @@ export async function PATCH(request) {
       token,
       `reservations?id=eq.${encodeURIComponent(id)}&select=*&limit=1`,
     );
-    if (!currentRows?.[0]) {
+    const current = currentRows?.[0];
+    if (!current) {
       return NextResponse.json({ error: "Réservation introuvable." }, { status: 404 });
     }
 
-    const updatedRows = await userSupabaseRequest(
-      config,
-      token,
-      `reservations?id=eq.${encodeURIComponent(id)}`,
-      {
-        method: "PATCH",
-        headers: { Prefer: "return=representation" },
-        body: JSON.stringify({
-          status,
-          updated_at: new Date().toISOString(),
-        }),
-      },
-    );
-    const reservation = updatedRows?.[0];
-    if (!reservation) {
-      return NextResponse.json({ error: "Mise à jour refusée." }, { status: 403 });
+    if (resendOnly && current.status !== "confirmed") {
+      return NextResponse.json(
+        { error: "La réservation doit être confirmée avant de renvoyer le courriel." },
+        { status: 400 },
+      );
+    }
+    if (resendOnly && current.reservation_type === "privatisation") {
+      return NextResponse.json(
+        { error: "Le renvoi automatique n’est pas prévu pour une privatisation." },
+        { status: 400 },
+      );
     }
 
-    let email = { sent: false, reason: "not_required" };
-    if (status === "confirmed" && reservation.reservation_type !== "privatisation") {
+    let reservation = current;
+    if (!resendOnly) {
+      const updatedRows = await userSupabaseRequest(
+        config,
+        token,
+        `reservations?id=eq.${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            status,
+            updated_at: new Date().toISOString(),
+          }),
+        },
+      );
+      reservation = updatedRows?.[0];
+      if (!reservation) {
+        return NextResponse.json({ error: "Mise à jour refusée." }, { status: 403 });
+      }
+    }
+
+    let email = { sent: false, reason: "not_required", tracking: {} };
+    const shouldSendConfirmation =
+      (resendOnly || status === "confirmed") &&
+      reservation.reservation_type !== "privatisation";
+
+    if (shouldSendConfirmation) {
       const establishments = await supabaseRequest(
         config,
         `establishments?id=eq.${encodeURIComponent(reservation.establishment_id)}&select=name&limit=1`,
@@ -384,15 +532,19 @@ export async function PATCH(request) {
         config,
         reservation,
         establishments?.[0]?.name || "Maison Oddos",
+        { force: resendOnly },
       );
+      reservation = { ...reservation, ...(email.tracking || {}) };
     }
 
     return NextResponse.json({
       ok: true,
       reservation,
       email_sent: email.sent,
+      email_status: email.status || null,
       email_reason: email.reason || null,
-      email_details: email.details || null,
+      email_details: email.error || null,
+      resent: resendOnly,
     });
   } catch (error) {
     console.error("reservation PATCH", error);
