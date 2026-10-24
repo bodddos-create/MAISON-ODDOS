@@ -3,13 +3,16 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/preview-dev.mjs",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:game": "node --test tests/slot-machine.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.57.4",
+    "@zxing/browser": "0.2.1",
     "next": "16.0.10",
+    "qrcode.react": "4.2.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "tesseract.js": "7.0.0",
