@@ -10,7 +10,7 @@ import {
 } from "../../lib/roue-config";
 import "./roue.css";
 import SlotMachine from "./SlotMachine";
-export default function Roue() {
+export default function Roue({ demo = false }) {
   const [name, setName] = useState(""),
     [email, setEmail] = useState(""),
     [consent, setConsent] = useState(false),
@@ -23,9 +23,11 @@ export default function Roue() {
     [details, setDetails] = useState(false),
     [spinOutcome, setSpinOutcome] = useState(null),
     [rolling, setRolling] = useState(false),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [demoChoice, setDemoChoice] = useState("formule29");
   useEffect(() => {
     setReady(true);
+    if (demo) return;
     const params = new URLSearchParams(window.location.hash.slice(1)),
       t = params.get("ticket"),
       code = parseCode(params.get("bon"));
@@ -45,9 +47,10 @@ export default function Roue() {
         .catch((e) => setError(e.message))
         .finally(() => setBusy(false));
     }
-  }, []);
+  }, [demo]);
   const now = new Date(),
-    open = ready && now >= new Date(startsAt) && now <= new Date(endsAt);
+    open =
+      ready && (demo || (now >= new Date(startsAt) && now <= new Date(endsAt)));
   async function api(path, body) {
     const r = await fetch(path, {
         method: "POST",
@@ -63,6 +66,17 @@ export default function Roue() {
     setBusy(true);
     setError("");
     try {
+      if (demo) {
+        const p = prizes.find((p) => p.id === spinOutcome.prize);
+        setResult({
+          code: "DEMO-ESSAI-" + Date.now().toString(16).toUpperCase(),
+          prize: p.id,
+          label: p.label,
+          expiresAt: "2026-11-30T22:59:59.999Z",
+          demo: true,
+        });
+        return;
+      }
       const d = await api("/api/roue/demande", {
         name,
         email,
@@ -98,7 +112,13 @@ export default function Roue() {
     setError("");
     setSpinOutcome(null);
     try {
-      const d = await api("/api/roue/tirage", { rules, adult: rules });
+      const d = demo
+        ? {
+            win: demoChoice !== "loss",
+            prize: demoChoice === "loss" ? null : demoChoice,
+            winTicket: "demo-only",
+          }
+        : await api("/api/roue/tirage", { rules, adult: rules });
       const reduced = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       ).matches;
@@ -119,6 +139,21 @@ export default function Roue() {
 
   return (
     <div className="wheel-app">
+      {demo && (
+        <div
+          className="demo-banner"
+          style={{
+            background: "#293d31",
+            color: "#fff",
+            padding: "14px 20px",
+            textAlign: "center",
+            font: "12px/1.8 Arial,sans-serif",
+          }}
+        >
+          MODE ESSAI · Aucun cadeau réel attribué · Aucun e-mail envoyé · Aucune
+          donnée enregistrée
+        </div>
+      )}
       <header>
         <a href="https://www.lamaisonduparc-salles.fr/" className="wordmark">
           LA MAISON DU PARC<small>UNE ADRESSE MAISON ODDOS</small>
@@ -131,6 +166,47 @@ export default function Roue() {
         </nav>
       </header>
       <main>
+        {demo && (
+          <div
+            style={{
+              maxWidth: 1100,
+              margin: "24px auto 0",
+              padding: "0 24px",
+              font: "13px/1.8 Arial,sans-serif",
+            }}
+          >
+            <label>
+              Prochain essai :{" "}
+              <select
+                aria-label="Résultat du prochain essai"
+                value={demoChoice}
+                disabled={busy}
+                onChange={(e) => setDemoChoice(e.target.value)}
+              >
+                <option value="loss">Partie perdante</option>
+                {prizes.map((p) => (
+                  <option value={p.id} key={p.id}>
+                    Gain : {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              style={{ marginLeft: 16 }}
+              disabled={busy}
+              onClick={() => {
+                setResult(null);
+                setSpinOutcome(null);
+                setMessage("");
+                setError("");
+                setEmail("");
+                setName("");
+              }}
+            >
+              Recommencer l’essai
+            </button>
+          </div>
+        )}
         <section className="experience">
           <div className="editorial">
             <div className="eyebrow">
@@ -195,7 +271,9 @@ export default function Roue() {
             {result ? (
               <section className="result" aria-live="polite">
                 <div className="result-tag">
-                  VOTRE CADEAU À LA MAISON DU PARC
+                  {demo
+                    ? "BON DE DÉMONSTRATION · SANS VALEUR COMMERCIALE"
+                    : "VOTRE CADEAU À LA MAISON DU PARC"}
                 </div>
                 <h2>{result.label}</h2>
                 <div className="coupon">
@@ -283,9 +361,10 @@ export default function Roue() {
                     </strong>
                   </p>
                   <p>
-                    Indiquez votre e-mail pour récupérer votre bon. Le cadeau
-                    est réservé pendant 15 minutes ; confirmez votre adresse
-                    grâce au lien reçu.
+                    {demo
+                      ? "Utilisez une adresse fictive, par exemple test@example.com. Aucun e-mail ne sera envoyé."
+                      : "Indiquez votre e-mail pour récupérer votre bon."}{" "}
+                    {!demo && <>Le cadeau est réservé pendant 15 minutes ; confirmez votre adresse grâce au lien reçu.</>}
                   </p>
                 </div>
                 <div className="fields">
