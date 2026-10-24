@@ -17,17 +17,24 @@ const sb = createClient(
   "sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE",
 );
 
-const isPublicPage = (pathname) => (
+const isPublicPage = (pathname) =>
+  pathname === "/jeu" ||
+  pathname.startsWith("/jeu/") ||
+  pathname === "/roue" ||
+  pathname.startsWith("/roue/") ||
   pathname === "/reservation" ||
   pathname.startsWith("/reservation/") ||
   pathname === "/equipe" ||
-  pathname.startsWith("/equipe/")
-);
+  pathname.startsWith("/equipe/");
 
 export default function AppShell({ children }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [access, setAccess] = useState({ loading: true, user: null, profile: null });
+  const [access, setAccess] = useState({
+    loading: true,
+    user: null,
+    profile: null,
+  });
 
   useEffect(() => {
     let alive = true;
@@ -50,7 +57,9 @@ export default function AppShell({ children }) {
     }
 
     resolveAccess();
-    const { data: { subscription } } = sb.auth.onAuthStateChange(() => {
+    const {
+      data: { subscription },
+    } = sb.auth.onAuthStateChange(() => {
       window.setTimeout(resolveAccess, 0);
     });
     return () => {
@@ -60,28 +69,44 @@ export default function AppShell({ children }) {
   }, []);
 
   const reservationStaff = access.profile?.role === "reservation_staff";
-  const management = ["direction", "administratif"].includes(access.profile?.role);
-  const staffOnForbiddenPage = reservationStaff && pathname !== "/reservations" && !isPublicPage(pathname);
+  const management = ["direction", "administratif"].includes(
+    access.profile?.role,
+  );
+  const staffOnForbiddenPage =
+    reservationStaff &&
+    !["/reservations", "/bons-cadeaux"].includes(pathname) &&
+    !isPublicPage(pathname);
 
   useEffect(() => {
-    if (!access.loading && staffOnForbiddenPage) router.replace("/reservations");
+    if (!access.loading && staffOnForbiddenPage)
+      router.replace("/reservations");
   }, [access.loading, staffOnForbiddenPage, router]);
 
   if ((access.loading && !isPublicPage(pathname)) || staffOnForbiddenPage) {
-    return <main><section><div className="formCard"><p>Ouverture de l’espace Réservations…</p></div></section></main>;
+    return (
+      <main>
+        <section>
+          <div className="formCard">
+            <p>Ouverture de l’espace Réservations…</p>
+          </div>
+        </section>
+      </main>
+    );
   }
 
   return (
     <>
-      {management && <>
-        <InvoiceTabRouter />
-        <TTCDisplayEnhancer />
-        <PersonnelDailyCost />
-        <PersonnelManager />
-        <DirectionFinanceChart />
-        <DirectionVatSummary />
-        <OpeningCalendar />
-      </>}
+      {management && (
+        <>
+          <InvoiceTabRouter />
+          <TTCDisplayEnhancer />
+          <PersonnelDailyCost />
+          <PersonnelManager />
+          <DirectionFinanceChart />
+          <DirectionVatSummary />
+          <OpeningCalendar />
+        </>
+      )}
       {children}
       {management && pathname !== "/reservations" && <VatFloatingButton />}
     </>
