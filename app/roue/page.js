@@ -364,7 +364,12 @@ export default function Roue({ demo = false }) {
                     {demo
                       ? "Utilisez une adresse fictive, par exemple test@example.com. Aucun e-mail ne sera envoyé."
                       : "Indiquez votre e-mail pour récupérer votre bon."}{" "}
-                    {!demo && <>Le cadeau est réservé pendant 15 minutes ; confirmez votre adresse grâce au lien reçu.</>}
+                    {!demo && (
+                      <>
+                        Le cadeau est réservé pendant 15 minutes ; confirmez
+                        votre adresse grâce au lien reçu.
+                      </>
+                    )}
                   </p>
                 </div>
                 <div className="fields">

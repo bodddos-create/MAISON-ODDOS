@@ -99,3 +99,22 @@ begin
 end;$$;
 revoke all on function public.wheel_spin(text,text,text),public.wheel_request_ticket(text,text,text,boolean,text,text,text,text),public.wheel_claim(text,text) from public,anon,authenticated;
 grant execute on function public.wheel_spin(text,text,text),public.wheel_request_ticket(text,text,text,boolean,text,text,text,text),public.wheel_claim(text,text) to service_role;
+
+-- Maintenance is called by the existing authenticated daily job.
+create function public.wheel_cleanup()
+returns jsonb language plpgsql security invoker set search_path='' as $$
+declare tickets_removed integer; spins_removed integer; anonymized integer:=0;
+begin
+ delete from public.wheel_tickets where expires_at<now()-interval '1 day';
+ get diagnostics tickets_removed=row_count;
+ delete from public.wheel_spins s where expires_at<now()-interval '1 day' and not exists(select 1 from public.wheel_tickets t where t.spin_id=s.id);
+ get diagnostics spins_removed=row_count;
+ if now()>='2027-02-28 00:00 Europe/Paris'::timestamptz then
+  update public.wheel_entries set email='anonymized-'||id||'@invalid.local',name='Anonymisé',used_by=null,email_id=null
+  where campaign='parc-novembre-2026' and not consent and name<>'Anonymisé';
+  get diagnostics anonymized=row_count;
+ end if;
+ return jsonb_build_object('tickets_removed',tickets_removed,'spins_removed',spins_removed,'anonymized',anonymized);
+end;$$;
+revoke all on function public.wheel_cleanup() from public,anon,authenticated;
+grant execute on function public.wheel_cleanup() to service_role;
