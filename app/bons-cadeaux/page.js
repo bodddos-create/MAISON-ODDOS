@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { prizes, parseCode } from "../../lib/roue-config";
+import { prizes, parseCode, canRedeem } from "../../lib/roue-config";
 import BonScanner from "./BonScanner";
 import "../roue/roue.css";
 const sb = createClient(
@@ -378,6 +378,8 @@ export default function Bons() {
                             `Utilisé le ${new Date(e.used_at).toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}`
                           ) : statusOf(e) === "expired" ? (
                             "Expiré"
+                          ) : !canRedeem() ? (
+                            "Utilisable à partir du mardi 27 octobre 2026"
                           ) : (
                             <button
                               disabled={busy}

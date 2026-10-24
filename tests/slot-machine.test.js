@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { prizes, reelIds, parseCode } from "../lib/roue-config.js";
+import {
+  prizes,
+  reelIds,
+  parseCode,
+  startsAt,
+  canRedeem,
+} from "../lib/roue-config.js";
 import { staff, requestDb, sameOrigin } from "../lib/roue-server.js";
 test("Each prize is represented by exactly three identical reels", () => {
   for (const p of prizes) assert.deepEqual(reelIds(p.id), [p.id, p.id, p.id]);
@@ -92,4 +98,10 @@ test("A successful minimal database update can return an empty body", async () =
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("Playing opens before vouchers can be redeemed, at Paris midnight", () => {
+  assert.ok(new Date(startsAt) < new Date("2026-10-26T23:00:00Z"));
+  assert.equal(canRedeem(new Date("2026-10-26T22:59:59.999Z")), false);
+  assert.equal(canRedeem(new Date("2026-10-26T23:00:00Z")), true);
 });

@@ -7,6 +7,7 @@ import {
   startsAt,
   endsAt,
   parseCode,
+  canRedeem,
 } from "../../lib/roue-config";
 import "./roue.css";
 import SlotMachine from "./SlotMachine";
@@ -246,11 +247,13 @@ export default function Roue({ demo = false }) {
             </div>
             <div className="editorial-note">
               <p>
-                <strong>Du 27 octobre au 27 novembre 2026 inclus.</strong>
+                <strong>
+                  Jouez dès maintenant et jusqu’au 27 novembre 2026 inclus.
+                </strong>
                 <br />
                 15 formules et 60 boissons à gagner.
                 <br />
-                Bons utilisables jusqu’au 30 novembre 2026 inclus.
+                Bons utilisables du mardi 27 octobre au 30 novembre 2026 inclus.
                 <br />
                 Dans la limite des 75 lots disponibles.
               </p>
@@ -259,7 +262,7 @@ export default function Roue({ demo = false }) {
           <div className="game-panel">
             <div className="game-title">
               <span>LA MACHINE GOURMANDE</span>
-              <span className="edition">27 OCT. — 27 NOV. 2026</span>
+              <span className="edition">JUSQU’AU 27 NOV. 2026</span>
             </div>
             <SlotMachine
               busy={rolling}
@@ -297,14 +300,18 @@ export default function Roue({ demo = false }) {
                       title="QR code du bon cadeau"
                     />
                   </div>
-                  <small>Valable jusqu’au 30 novembre 2026 inclus.</small>
+                  <small>
+                    Utilisable du mardi 27 octobre au 30 novembre 2026 inclus.
+                  </small>
                 </div>
                 <p>
                   {result.used
                     ? "Ce bon a déjà été utilisé."
                     : new Date(result.expiresAt) < new Date()
                       ? "Ce bon a expiré."
-                      : "À présenter à l’équipe avant la remise du cadeau. Utilisable une seule fois."}
+                      : !canRedeem()
+                        ? "Conservez votre bon : il sera utilisable à partir du mardi 27 octobre 2026."
+                        : "À présenter à l’équipe avant la remise du cadeau. Utilisable une seule fois."}
                 </p>
                 {result.emailSent === false && (
                   <p role="alert">
@@ -481,7 +488,7 @@ export default function Roue({ demo = false }) {
             {!result && ready && !open && (
               <p role="status" className="fine">
                 {now < new Date(startsAt)
-                  ? "Rendez-vous le 27 octobre 2026 pour participer."
+                  ? "Le jeu ouvre prochainement."
                   : "Les participations sont closes. Vos bons restent valables jusqu’au 30 novembre inclus."}
               </p>
             )}
@@ -550,7 +557,7 @@ export default function Roue({ demo = false }) {
               contact@lamaisonduparc-salles.fr.
             </p>
             <p>
-              Participation réservée aux personnes majeures, du 27 octobre 2026
+              Participation réservée aux personnes majeures, du 25 octobre 2026
               à 00 h au 27 novembre 2026 à 23 h 59, heure de Paris, dans la
               limite de 75 cadeaux. Les parties gratuites peuvent être rejouées.
               Une chance sur cinq de gagner, sous réserve des lots encore
@@ -568,9 +575,9 @@ export default function Roue({ demo = false }) {
             <p>
               Lots : 5 formules à 19 €, 5 formules à 29 €, 5 formules à 39 €, 20
               bières Grolsch 25 cl, 20 boissons sans alcool et 20 cocktails.
-              Bons utilisables à La Maison du Parc jusqu’au 30 novembre 2026
-              inclus, selon ses horaires d’ouverture. Chaque code est utilisable
-              une seule fois.
+              Bons utilisables à La Maison du Parc du mardi 27 octobre au 30
+              novembre 2026 inclus, selon ses horaires d’ouverture. Chaque code
+              est utilisable une seule fois.
             </p>
             <p>
               Le prénom, l’e-mail, le gain, les dates et la preuve de

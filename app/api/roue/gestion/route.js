@@ -7,6 +7,7 @@ import {
   staff,
   emailCoupon,
 } from "../../../../lib/roue-server";
+import { canRedeem } from "../../../../lib/roue-config";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export async function GET(req) {
@@ -50,6 +51,14 @@ export async function PATCH(req) {
     )
       return NextResponse.json({ error: "Action invalide." }, { status: 400 });
     if (data.action === "redeem") {
+      if (!canRedeem())
+        return NextResponse.json(
+          {
+            error:
+              "Ce cadeau est utilisable à partir du mardi 27 octobre 2026.",
+          },
+          { status: 409 },
+        );
       const rows = await requestDb(
         c,
         `wheel_entries?campaign=eq.${campaign}&id=eq.${data.id}&used_at=is.null&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`,
