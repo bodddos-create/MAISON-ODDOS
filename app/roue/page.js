@@ -506,6 +506,17 @@ export default function Roue({ demo = false }) {
                   : "Les participations sont closes. Vos bons restent valables jusqu’au 30 novembre inclus."}
               </p>
             )}
+            {(spinOutcome !== null || result || message || ticket) && (
+              <aside aria-labelledby="community-title" style={{marginTop:28,padding:"24px 20px",borderTop:"1px solid #c8b791",background:"#f3efe6",textAlign:"center"}}>
+                <h2 id="community-title" style={{fontSize:25}}>Gardons le plaisir de nous retrouver !</h2>
+                <p>Suivez La Maison du Parc pour découvrir nos menus, nos soirées et les prochaines surprises.</p>
+                <div style={{display:"flex",flexWrap:"wrap",gap:12,justifyContent:"center",margin:"18px 0"}}>
+                  <a href="https://www.facebook.com/profile.php?id=61590291296284" target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"14px 20px",background:"#344131",color:"#fff",textDecoration:"none",borderRadius:4}}>Suivre sur Facebook</a>
+                  <a href="https://www.instagram.com/lamaisonduparcsalles/" target="_blank" rel="noopener noreferrer" style={{display:"inline-block",padding:"14px 20px",background:"#344131",color:"#fff",textDecoration:"none",borderRadius:4}}>Suivre sur Instagram</a>
+                </div>
+                <p className="fine">Abonnement facultatif, sans effet sur vos chances de gagner ou sur votre cadeau.</p>
+              </aside>
+            )}
             {error && (
               <p className="error" role="alert">
                 {error}
