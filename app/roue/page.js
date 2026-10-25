@@ -24,6 +24,7 @@ export default function Roue({ demo = false }) {
     [details, setDetails] = useState(false),
     [spinOutcome, setSpinOutcome] = useState(null),
     [rolling, setRolling] = useState(false),
+    [playsLeft, setPlaysLeft] = useState(null),
     [ready, setReady] = useState(false),
     [demoChoice, setDemoChoice] = useState("formule29");
   const claiming = useRef(false);
@@ -128,6 +129,7 @@ export default function Roue({ demo = false }) {
             winTicket: "demo-only",
           }
         : await api("/api/roue/tirage", { rules, adult: rules });
+      if (!demo && Number.isInteger(d.playsLeft)) setPlaysLeft(d.playsLeft);
       const reduced = window.matchMedia(
         "(prefers-reduced-motion: reduce)",
       ).matches;
@@ -461,9 +463,10 @@ export default function Roue({ demo = false }) {
                 </h2>
                 <p>
                   {spinOutcome?.win === false
-                    ? "Cette partie n’est pas gagnante. Vous pouvez rejouer gratuitement."
-                    : "Jouez gratuitement, sans inscription. Votre e-mail sera demandé uniquement si vous gagnez un cadeau."}
+                    ? "Cette partie n’est pas gagnante. Vous pouvez rejouer gratuitement dans la limite de 10 parties par jour."
+                    : "Jouez gratuitement, jusqu’à 10 parties par jour et par navigateur. Votre e-mail sera demandé uniquement si vous gagnez un cadeau."}
                 </p>
+                {!demo && playsLeft !== null && <p role="status">{playsLeft} partie{playsLeft > 1 ? "s" : ""} restante{playsLeft > 1 ? "s" : ""} aujourd’hui sur ce navigateur.</p>}
                 <label className="check">
                   <input
                     type="checkbox"
@@ -570,7 +573,7 @@ export default function Roue({ demo = false }) {
             <p>
               Participation réservée aux personnes majeures, du 25 octobre 2026
               à 00 h au 27 novembre 2026 à 23 h 59, heure de Paris, dans la
-              limite de 75 cadeaux. Les parties gratuites peuvent être rejouées.
+              limite de 75 cadeaux. Les parties gratuites peuvent être rejouées dans la limite de 10 parties par jour et par navigateur, avec remise à zéro à minuit, heure de Paris. Un cookie technique signé, conservé 30 jours, permet de faire respecter cette limite sans demander votre e-mail avant le gain.
               Une chance sur cinq de gagner, sous réserve des lots encore
               disponibles. Un seul cadeau par adresse e-mail vérifiée. Le lot
               est attribué aléatoirement côté serveur parmi le stock disponible.

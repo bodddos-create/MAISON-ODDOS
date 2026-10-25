@@ -8,6 +8,7 @@ import {
   requestDb,
   safeError,
 } from "../../../../lib/roue-server";
+import { browserCookie, browserIdentity } from "../../../../lib/game-browser";
 export const runtime = "nodejs";
 export async function POST(req) {
   try {
@@ -42,18 +43,23 @@ export async function POST(req) {
       .createHmac("sha256", c.key)
       .update(ip.split(",")[0].trim())
       .digest("hex");
-    const result = await requestDb(c, "rpc/wheel_spin", {
+    const cookie = String(req.headers.get("cookie") || "").split(";").map(v => v.trim()).find(v => v.startsWith(browserCookie + "="))?.slice(browserCookie.length + 1);
+    const browser = browserIdentity(cookie, c.key);
+    const result = await requestDb(c, "rpc/wheel_spin_daily", {
       method: "POST",
       body: JSON.stringify({
         p_campaign: campaign,
         p_token_hash: hash(token),
         p_ip_hash: ipHash,
+        p_browser_hash: browser.hash,
       }),
     });
-    return NextResponse.json(
+    const response = NextResponse.json(
       { ...result, winTicket: result.win ? token : null },
       { headers: { "Cache-Control": "no-store" } },
     );
+    response.cookies.set(browserCookie, browser.value, { httpOnly: true, secure: true, sameSite: "lax", path: "/", maxAge: 30 * 86400 });
+    return response;
   } catch (e) {
     const error = safeError(e);
     return NextResponse.json(
