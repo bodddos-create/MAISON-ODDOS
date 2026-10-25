@@ -22,8 +22,11 @@ export async function GET(req) {
       c,
       `wheel_entries?campaign=eq.${campaign}&select=id,email,name,prize,code,consent,consent_text,created_at,expires_at,used_at,email_status&order=created_at.desc&limit=100`,
     );
+    const daily = await requestDb(c,
+      `wheel_daily_stats?campaign=eq.${campaign}&select=day,plays,wins&order=day.asc&limit=366`,
+    );
     return NextResponse.json(
-      { entries },
+      { entries, daily },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { prizes, parseCode, canRedeem } from "../../lib/roue-config";
 import BonScanner from "./BonScanner";
+import { gameStatistics, parisDay } from "../../lib/game-statistics";
+import { startsAt } from "../../lib/roue-config";
 import "../roue/roue.css";
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -21,7 +23,10 @@ const normalize = (s) =>
     .toLowerCase()
     .trim();
 export default function Bons() {
-  const [entries, setEntries] = useState([]),
+  const [daily, setDaily] = useState([]),
+    [from, setFrom] = useState(parisDay(startsAt)),
+    [to, setTo] = useState(parisDay()),
+    [entries, setEntries] = useState([]),
     [search, setSearch] = useState(""),
     [status, setStatus] = useState("all"),
     [error, setError] = useState(""),
@@ -43,6 +48,7 @@ export default function Bons() {
         d = await r.json();
       if (!r.ok) throw Error(d.error);
       setEntries(d.entries);
+      setDaily(d.daily || []);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -199,6 +205,8 @@ export default function Bons() {
         normalize(search),
       ),
   );
+  const analysis = gameStatistics(daily, entries, from, to);
+  const peak = Math.max(1, ...analysis.days.map(d => d.plays));
   return (
     <div className="wheel-app">
       <header>
@@ -251,6 +259,35 @@ export default function Bons() {
           </form>
         ) : (
           <>
+            <section aria-labelledby="game-analysis-title">
+              <h2 id="game-analysis-title">Statistiques du jeu</h2>
+              <div className="tools">
+                <label>Du<input type="date" value={from} min={parisDay(startsAt)} max={to} onChange={e => setFrom(e.target.value)} /></label>
+                <label>Au<input type="date" value={to} min={from} max={parisDay()} onChange={e => setTo(e.target.value)} /></label>
+                <button disabled={loading || busy} onClick={() => load(token)}>Actualiser les statistiques</button>
+              </div>
+              {from > to && <p role="alert">La date de début doit précéder la date de fin.</p>}
+              <div className="stats">
+                <div><strong>{analysis.plays}</strong><span>parties jouées</span></div>
+                <div><strong>{analysis.wins}</strong><span>tirages gagnants</span></div>
+                <div><strong>{analysis.claimed}</strong><span>gagnants avec e-mail vérifié</span></div>
+                <div><strong>{analysis.used}</strong><span>cadeaux remis sur la période</span></div>
+                <div><strong>{analysis.newsletter}</strong><span>accords newsletter parmi ces gagnants</span></div>
+              </div>
+              <p>Une personne peut jouer plusieurs fois. Ces chiffres comptent des parties, pas des visiteurs uniques. Un tirage gagnant ne devient un bon attribué qu’après vérification de l’e-mail. Dates en heure de Paris.</p>
+              {loading ? <p>Actualisation des statistiques…</p> : <div className="table-wrap">
+                <table aria-label="Évolution quotidienne du jeu">
+                  <thead><tr><th>Date</th><th>Parties jouées</th><th>Tirages gagnants</th><th>Bons récupérés</th><th>Cadeaux remis</th></tr></thead>
+                  <tbody>{analysis.days.map(d => <tr key={d.day}>
+                    <td>{d.day.split('-').reverse().join('/')}</td>
+                    <td><strong>{d.plays}</strong><div aria-hidden="true" style={{height:6,background:'#d8c6a3',width:`${100*d.plays/peak}%`,minWidth:d.plays ? 3 : 0,marginTop:5}} /></td>
+                    <td>{d.wins}</td><td>{d.claimed}</td><td>{d.used}</td>
+                  </tr>)}</tbody>
+                </table>
+                {!analysis.plays && <p>Aucune partie enregistrée sur cette période.</p>}
+              </div>}
+            </section>
+            <h2>Stock et suivi des cadeaux — toute la campagne</h2>
             <div className="stats">
               <div>
                 <strong>{entries.length}</strong>
