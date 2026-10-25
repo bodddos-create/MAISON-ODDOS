@@ -71,6 +71,18 @@ export default function Bons() {
       subscription.unsubscribe();
     };
   }, [load]);
+  useEffect(() => {
+    if (!token) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load(token);
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [load, token]);
   async function login(e) {
     e.preventDefault();
     setBusy(true);
@@ -194,6 +206,7 @@ export default function Bons() {
           MAISON ODDOS<small>GESTION DES BONS · LA MAISON DU PARC</small>
         </a>
         <nav>
+          <a href="/">Pilotage Restaurant</a>
           <a href="/reservations">Réservations</a>
           <a href="/jeu">Voir le jeu</a>
         </nav>
@@ -245,7 +258,7 @@ export default function Bons() {
               </div>
               <div>
                 <strong>{entries.filter((e) => e.used_at).length}</strong>
-                <span>cadeaux utilisés</span>
+                <span>cadeaux remis</span>
               </div>
               <div>
                 <strong>{Math.max(0, 75 - entries.length)}</strong>
@@ -256,6 +269,7 @@ export default function Bons() {
                 <span>accords newsletter</span>
               </div>
             </div>
+            <p>Scannez le QR code du client, vérifiez son lot puis confirmez sa remise. Chaque bon est utilisable une seule fois ; le décompte se met à jour après validation.</p>
             <section className="table-wrap" aria-label="Stock des lots">
               <table>
                 <thead>
@@ -263,8 +277,9 @@ export default function Bons() {
                     <th>Lot</th>
                     <th>Initial</th>
                     <th>Attribués</th>
-                    <th>Utilisés</th>
-                    <th>Restants</th>
+                    <th>Remis</th>
+                    <th>À remettre</th>
+                    <th>À gagner</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -276,7 +291,8 @@ export default function Bons() {
                         <td>{p.count}</td>
                         <td>{selected.length}</td>
                         <td>{selected.filter((e) => e.used_at).length}</td>
-                        <td>{p.count - selected.length}</td>
+                        <td>{selected.filter((e) => statusOf(e) === "available").length}</td>
+                        <td>{Math.max(0, p.count - selected.length)}</td>
                       </tr>
                     );
                   })}
@@ -285,7 +301,7 @@ export default function Bons() {
             </section>
             <div className="tools">
               <button disabled={busy} onClick={() => setScanning(true)}>
-                Scanner un bon avec la caméra
+                Scanner un QR code avec le téléphone
               </button>
               <label>
                 Rechercher un bon

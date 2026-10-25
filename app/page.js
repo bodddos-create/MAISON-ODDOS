@@ -805,12 +805,13 @@ export default function Home() {
           ["evolution-ca", "Évolution du CA"],
           ["analyse-produits", "Analyse produits"],
           ["reservations", "Réservations"],
+          ["bons-cadeaux", "Bons cadeaux · Scan QR"],
         ].map(([k, l]) => (
           <button
             key={k}
             className={tab === k ? "active" : ""}
             onClick={() => {
-              if (["evolution-ca", "analyse-produits", "reservations"].includes(k)) {
+              if (["evolution-ca", "analyse-produits", "reservations", "bons-cadeaux"].includes(k)) {
                 window.location.href = `/${k}`;
                 return;
               }
