@@ -28,21 +28,15 @@ export async function POST(req) {
         .trim()
         .toLowerCase(),
       name = String(data?.name || "").trim();
-    if (
-      data?.website ||
-      !name ||
-      name.length > 70 ||
-      email.length > 254 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-      data?.rules !== true ||
-      data?.adult !== true ||
-      typeof data?.consent !== "boolean" ||
-      !/^[a-f0-9]{64}$/.test(data?.winTicket || "")
-    )
-      return NextResponse.json(
-        { error: "Vérifiez les champs et les conditions de participation." },
-        { status: 400 },
-      );
+    let validationError = "";
+    if (data?.website) validationError = "Le formulaire a été rempli automatiquement de façon incorrecte. Rechargez le formulaire puis réessayez.";
+    else if (!name || name.length > 70) validationError = "Indiquez votre prénom (70 caractères maximum).";
+    else if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) validationError = "Indiquez une adresse e-mail valide, par exemple prenom@exemple.fr.";
+    else if (data?.rules !== true || data?.adult !== true) validationError = "Cochez la case confirmant votre majorité et l’acceptation des conditions du jeu.";
+    else if (typeof data?.consent !== "boolean") validationError = "Vérifiez votre choix pour la newsletter (facultative).";
+    else if (!/^[a-f0-9]{64}$/.test(data?.winTicket || "")) validationError = "La référence de votre gain est manquante. Gardez cette page ouverte et contactez le restaurant.";
+    if (validationError)
+      return NextResponse.json({ error: validationError }, { status: 400 });
     const c = config();
     if (!c.resend)
       return NextResponse.json(

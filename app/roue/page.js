@@ -64,6 +64,7 @@ export default function Roue({ demo = false }) {
   }
   async function requestTicket(e) {
     e.preventDefault();
+    const fields = new FormData(e.currentTarget);
     setBusy(true);
     setError("");
     try {
@@ -79,13 +80,13 @@ export default function Roue({ demo = false }) {
         return;
       }
       const d = await api("/api/roue/demande", {
-        name,
-        email,
-        consent,
-        rules,
-        adult: rules,
+        name: String(fields.get("name") || "").trim(),
+        email: String(fields.get("email") || "").trim(),
+        consent: fields.get("newsletter") === "on",
+        rules: fields.get("rules") === "on",
+        adult: fields.get("rules") === "on",
         winTicket: spinOutcome?.winTicket,
-        website: new FormData(e.currentTarget).get("website"),
+        website: "",
       });
       setMessage(d.message);
     } catch (e) {
@@ -385,6 +386,7 @@ export default function Roue({ demo = false }) {
                     <input
                       required
                       maxLength={70}
+                      name="name"
                       autoComplete="given-name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -397,6 +399,7 @@ export default function Roue({ demo = false }) {
                       required
                       type="email"
                       maxLength={254}
+                      name="email"
                       autoComplete="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -405,11 +408,12 @@ export default function Roue({ demo = false }) {
                   </label>
                 </div>
                 <div className="trap" aria-hidden="true">
-                  <input name="website" tabIndex={-1} autoComplete="off" />
+                  <input type="hidden" name="website" value="" readOnly />
                 </div>
                 <label className="check">
                   <input
                     type="checkbox"
+                    name="rules"
                     required
                     checked={rules}
                     onChange={(e) => setRules(e.target.checked)}
@@ -426,6 +430,7 @@ export default function Roue({ demo = false }) {
                 <label className="check">
                   <input
                     type="checkbox"
+                    name="newsletter"
                     checked={consent}
                     onChange={(e) => setConsent(e.target.checked)}
                     disabled={busy}
