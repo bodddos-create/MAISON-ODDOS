@@ -36,7 +36,8 @@ export default function Bons() {
     [token, setToken] = useState(""),
     [email, setEmail] = useState(""),
     [password, setPassword] = useState(""),
-    [scanning, setScanning] = useState(false);
+    [scanning, setScanning] = useState(false),
+    [scannedCode, setScannedCode] = useState("");
   const load = useCallback(async (accessToken) => {
     setError("");
     setLoading(true);
@@ -110,6 +111,7 @@ export default function Bons() {
         setError("Code invalide.");
         return;
       }
+      setScannedCode(valid);
       setSearch(valid);
       setStatus("all");
       setNotice(
@@ -205,6 +207,8 @@ export default function Bons() {
         normalize(search),
       ),
   );
+  const scannedEntry = entries.find(e => e.code === scannedCode);
+  const invalidScan = scannedCode && !loading && !error && (!scannedEntry || statusOf(scannedEntry) !== "available");
   const analysis = gameStatistics(daily, entries, from, to);
   const peak = Math.max(1, ...analysis.days.map(d => d.plays));
   return (
@@ -462,6 +466,20 @@ export default function Bons() {
           </p>
         )}
         {scanning && <BonScanner onCode={scanned} onClose={closeScanner} />}
+        {invalidScan && (
+          <div className="modal-backdrop">
+            <section className="modal" role="alertdialog" aria-modal="true" aria-labelledby="invalid-scan-title" aria-describedby="invalid-scan-description" style={{border:"4px solid #b42318",textAlign:"center"}}>
+              <h2 id="invalid-scan-title" style={{fontFamily:"Arial, sans-serif",fontSize:"clamp(34px,7vw,56px)",fontWeight:800,color:"#b42318",lineHeight:1.1,margin:"24px 0"}}>NON VALIDE</h2>
+              <p id="invalid-scan-description" style={{fontSize:24,fontWeight:700,color:"#b42318"}}>
+                {scannedEntry?.used_at ? "BON DÉJÀ UTILISÉ" : scannedEntry ? "BON EXPIRÉ" : "BON INTROUVABLE"}
+              </p>
+              {scannedEntry?.used_at && <p>Utilisé le {new Date(scannedEntry.used_at).toLocaleString("fr-FR", {timeZone:"Europe/Paris"})}.</p>}
+              <p>Ne remettez pas de cadeau avec ce QR code.</p>
+              <button autoFocus onClick={() => setScannedCode("")}>Fermer</button>
+              <button onClick={() => { setScannedCode(""); setScanning(true); }}>Scanner un autre bon</button>
+            </section>
+          </div>
+        )}
       </main>
     </div>
   );
