@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import {
   prizes,
@@ -26,6 +26,7 @@ export default function Roue({ demo = false }) {
     [rolling, setRolling] = useState(false),
     [ready, setReady] = useState(false),
     [demoChoice, setDemoChoice] = useState("formule29");
+  const claiming = useRef(false);
   useEffect(() => {
     setReady(true);
     if (demo) return;
@@ -49,6 +50,12 @@ export default function Roue({ demo = false }) {
         .finally(() => setBusy(false));
     }
   }, [demo]);
+  useEffect(() => {
+    if (!demo && ticket && !claiming.current) {
+      claiming.current = true;
+      void claim(ticket);
+    }
+  }, [demo, ticket]);
   const now = new Date(),
     open =
       ready && (demo || (now >= new Date(startsAt) && now <= new Date(endsAt)));
@@ -95,11 +102,11 @@ export default function Roue({ demo = false }) {
       setBusy(false);
     }
   }
-  async function claim() {
+  async function claim(verifiedTicket = ticket) {
     setBusy(true);
     setError("");
     try {
-      const d = await api("/api/roue/jouer", { ticket });
+      const d = await api("/api/roue/jouer", { ticket: verifiedTicket });
       setResult(d);
       setBusy(false);
       window.history.replaceState(null, "", `/jeu#bon=${d.code}`);
@@ -340,16 +347,15 @@ export default function Roue({ demo = false }) {
               <section className="entry-form">
                 <h2>Votre bon vous attend.</h2>
                 <p>
-                  Confirmez pour récupérer le cadeau associé à votre adresse
-                  e-mail.
+                  Votre e-mail est confirmé. Votre bon et son QR code se préparent automatiquement.
                 </p>
-                <button className="spin" disabled={busy} onClick={claim}>
-                  {busy ? "Préparation du bon…" : "Récupérer mon bon cadeau"}
+                <button className="spin" disabled={busy} onClick={() => claim()}>
+                  {busy ? "Préparation du bon…" : "Réessayer d’afficher mon bon"}
                 </button>
               </section>
             ) : message ? (
               <section className="entry-form" aria-live="polite">
-                <h2>Consultez votre boîte mail.</h2>
+                <h2>Dernière étape : ouvrez votre e-mail.</h2>
                 <p>{message}</p>
                 <p>
                   Le lot est réservé 15 minutes après le gain. L’inscription à
@@ -362,7 +368,7 @@ export default function Roue({ demo = false }) {
             ) : spinOutcome?.win ? (
               <form className="entry-form" onSubmit={requestTicket}>
                 <div className="form-heading">
-                  <h2>Vous avez gagné !</h2>
+                  <h2>Vous avez gagné ! Où envoyer votre cadeau ?</h2>
                   <p>
                     <strong>
                       {prizes.find((p) => p.id === spinOutcome.prize)?.label}
@@ -371,7 +377,7 @@ export default function Roue({ demo = false }) {
                   <p>
                     {demo
                       ? "Utilisez une adresse fictive, par exemple test@example.com. Aucun e-mail ne sera envoyé."
-                      : "Indiquez votre e-mail pour récupérer votre bon."}{" "}
+                      : "Indiquez votre e-mail, puis ouvrez le lien reçu : votre bon avec son QR code apparaîtra automatiquement."}{" "}
                     {!demo && (
                       <>
                         Le cadeau est réservé pendant 15 minutes ; confirmez
@@ -440,7 +446,7 @@ export default function Roue({ demo = false }) {
                   </span>
                 </label>
                 <button className="spin" disabled={busy || !open}>
-                  {busy ? "Envoi en cours…" : "Recevoir mon bon cadeau"}
+                  {busy ? "Envoi en cours…" : "Recevoir le lien de mon cadeau"}
                 </button>
                 <p className="fine">
                   Participation gratuite · Newsletter facultative
