@@ -1,0 +1,8 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {validateEnquiry,restaurants} from '../lib/group-enquiries.mjs';
+const valid={restaurant:'parc',event_date:'2026-11-28',start_time:'12:00',end_time:'15:00',flexibility:'Date fixe',guests:25,occasion:'Repas d’entreprise',full_name:'Test Maison Oddos',email:'contact@lamaisonduparc-salles.fr',phone:'0535758210',privacy:true};
+test('both restaurants are fixed server-side destinations',()=>{assert.equal(restaurants.parc.email,'contact@lamaisonduparc-salles.fr');assert.equal(restaurants.villa.email,'contact@villavalleyre.fr');assert.equal(validateEnquiry({...valid,restaurant:'https://attacker.test'},'2026-10-26').valid,false);assert.equal(validateEnquiry({...valid,restaurant:'__proto__'},'2026-10-26').valid,false);});
+test('valid shared enquiry and optional end time',()=>{assert.equal(validateEnquiry(valid,'2026-10-26').valid,true);assert.equal(validateEnquiry({...valid,end_time:''},'2026-10-26').valid,true);});
+test('reject past or impossible dates, invalid party counts and reversed times',()=>{for(const patch of [{event_date:'2026-02-30'},{event_date:'2026-10-25'},{guests:0},{guests:2.5},{guests:1001},{end_time:'11:00'},{start_time:'25:00'}])assert.equal(validateEnquiry({...valid,...patch},'2026-10-26').valid,false);});
+test('contact fields and consent must be complete, newsletter consent is never inferred',()=>{for(const patch of [{privacy:false},{privacy:'true'},{email:'a\r\nBcc: other@test.fr'},{phone:'12'},{full_name:''},{occasion:'arbitrary'}])assert.equal(validateEnquiry({...valid,...patch},'2026-10-26').valid,false);assert.equal('newsletter' in validateEnquiry(valid,'2026-10-26').data,false);});

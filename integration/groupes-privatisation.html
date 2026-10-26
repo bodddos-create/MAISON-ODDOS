@@ -1,0 +1,33 @@
+<style>
+#oddos-groupes-dialog{border:0;padding:0;width:600px;max-width:calc(100vw - 24px);height:90dvh;max-height:900px;border-radius:24px;background:#fff;box-shadow:0 20px 90px #0005;overflow:hidden}
+#oddos-groupes-dialog::backdrop{background:#1f211bcc;backdrop-filter:blur(2px)}
+#oddos-groupes-dialog iframe{display:block;width:100%;height:100%;border:0;background:#fff}
+#oddos-groupes-dialog>button{position:absolute;top:12px;right:12px;z-index:2;border:0;background:white;color:#777;font:24px/1 Arial;padding:5px 9px;border-radius:6px;cursor:pointer}
+@media(max-width:600px){#oddos-groupes-dialog{width:100%;max-width:calc(100vw - 16px);height:94dvh;max-height:none;border-radius:18px}}
+.oddos-groupes-side{display:block;position:fixed;left:0;top:42%;z-index:10000;font:14px/1.5 Arial,sans-serif}.oddos-groupes-side summary{list-style:none;writing-mode:vertical-rl;padding:20px 13px;background:#b89b6b;color:#252522;border-radius:0 12px 12px 0;cursor:pointer;text-transform:uppercase;letter-spacing:2px}.oddos-groupes-side summary::-webkit-details-marker{display:none}.oddos-groupes-side nav{position:absolute;left:44px;top:0;width:235px;max-width:calc(100vw - 54px);padding:10px 18px;background:#41413e;border-left:2px solid #b89b6b;border-radius:0 16px 16px 16px;box-shadow:0 3px 18px #0004}.oddos-groupes-side nav a{display:block;color:#eee9df;padding:16px 0;text-decoration:none;border-bottom:1px solid #b89b6b55;font-size:14px}.oddos-groupes-side nav a:last-child{border-bottom:0}@media(min-width:761px){nav.oddos-compact-menu>a:not([href*="pilotage.oddos.eu/reservation"]){display:none!important}}
+</style>
+<script>
+(function(){
+function init(){
+ if(document.getElementById('oddos-groupes-dialog'))return;
+ var en=new URLSearchParams(location.search).get('lang')==='en';
+ var villa=location.hostname.indexOf('villavalleyre')!==-1;
+ var url='https://pilotage.oddos.eu/groupes?embed=1&restaurant='+(villa?'villa':'parc');
+ var label=en?'Groups & private events':'Groupes & privatisation';
+ var dialog=document.createElement('dialog');dialog.id='oddos-groupes-dialog';dialog.setAttribute('aria-label',label);
+ var close=document.createElement('button');close.type='button';close.setAttribute('aria-label',en?'Close form':'Fermer le formulaire');close.textContent='×';
+ var frame=document.createElement('iframe');frame.title=label;frame.setAttribute('loading','lazy');
+ dialog.append(close,frame);document.body.appendChild(dialog);
+ close.addEventListener('click',function(){dialog.close()});
+ dialog.addEventListener('click',function(e){if(e.target===dialog){var b=dialog.getBoundingClientRect();if(e.clientX<b.left||e.clientX>b.right||e.clientY<b.top||e.clientY>b.bottom)dialog.close()}});
+ window.addEventListener('message',function(e){if(e.origin==='https://pilotage.oddos.eu'&&e.source===frame.contentWindow&&e.data&&e.data.type==='oddos-groupes-close')dialog.close()});
+ function open(e){if(typeof dialog.showModal!=='function')return;e.preventDefault();var d=e.currentTarget.closest('details');if(d)d.removeAttribute('open');if(!frame.src)frame.src=url;dialog.showModal()}
+ if(!document.querySelector('.vv-mobile-tabs,.vv-mobiletabs,.lmp-mobiletabs')){
+ var topNav=document.querySelector('nav[aria-label="Navigation principale"],nav[aria-label="Main navigation"]');
+ if(topNav){topNav.classList.add('oddos-compact-menu');var details=document.createElement('details');details.className='lmp-mobiletabs oddos-groupes-side';var summary=document.createElement('summary');summary.textContent='Menu';summary.setAttribute('aria-label',en?'Open or close navigation':'Ouvrir ou fermer le menu');var side=document.createElement('nav');side.setAttribute('aria-label',en?'Quick navigation':'Navigation rapide');topNav.querySelectorAll(':scope>a').forEach(function(item){if(item.href.indexOf('pilotage.oddos.eu/reservation')===-1)side.appendChild(item.cloneNode(true))});details.append(summary,side);document.body.appendChild(details)}
+ }
+ document.querySelectorAll('.vv-mobile-tabs nav,.vv-mobiletabs nav,.lmp-mobiletabs nav').forEach(function(nav){var a=document.createElement('a');a.href=url;a.textContent=label;a.addEventListener('click',open);nav.appendChild(a)});
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+})();
+</script>

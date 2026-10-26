@@ -18,6 +18,7 @@ const sb = createClient(
 );
 
 const isPublicPage = (pathname) =>
+  pathname === "/groupes" ||
   pathname === "/jeu" ||
   pathname.startsWith("/jeu/") ||
   pathname === "/roue" ||
@@ -74,7 +75,7 @@ export default function AppShell({ children }) {
   );
   const staffOnForbiddenPage =
     reservationStaff &&
-    !["/reservations", "/bons-cadeaux"].includes(pathname) &&
+    !["/reservations", "/bons-cadeaux", "/demandes-groupes"].includes(pathname) &&
     !isPublicPage(pathname);
 
   useEffect(() => {
@@ -96,7 +97,7 @@ export default function AppShell({ children }) {
 
   return (
     <>
-      {management && (
+      {management && pathname !== "/groupes" && (
         <>
           <InvoiceTabRouter />
           <TTCDisplayEnhancer />
@@ -108,7 +109,7 @@ export default function AppShell({ children }) {
         </>
       )}
       {children}
-      {management && pathname !== "/reservations" && <VatFloatingButton />}
+      {management && pathname !== "/groupes" && pathname !== "/reservations" && <VatFloatingButton />}
     </>
   );
 }
