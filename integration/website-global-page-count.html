@@ -1,0 +1,12 @@
+<script id="oddos-global-page-count">
+(function(){
+ 'use strict';
+ if(window.oddosGlobalPageCountInstalled)return;window.oddosGlobalPageCountInstalled=true;
+ if(location.pathname.indexOf('/wp-admin')===0||location.search.indexOf('elementor-preview=')!==-1)return;
+ var sent=false;
+ function count(){if(sent||document.visibilityState!=='visible')return;sent=true;
+ fetch('https://pilotage.oddos.eu/api/site-visits',{method:'POST',credentials:'omit',referrerPolicy:'no-referrer',headers:{'Content-Type':'text/plain'},body:'{"mode":"aggregate"}',keepalive:true}).catch(function(){});
+ }
+ document.addEventListener('visibilitychange',count);count();
+})();
+</script>
