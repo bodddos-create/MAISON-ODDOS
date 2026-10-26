@@ -793,7 +793,7 @@ export default function Home() {
           </Field>
         </div>
       </section>
-      <nav>
+      <nav className="dashboard-tabs" aria-label="Rubriques de pilotage">
         {[
           ["direction", "Direction"],
           ["saisie", "Saisie manuelle"],
