@@ -15,7 +15,7 @@ function init(){
  var url='https://pilotage.oddos.eu/groupes?embed=1&restaurant='+(villa?'villa':'parc');
  var label=en?'Groups & private events':'Groupes & privatisation';
  var dialog=document.createElement('dialog');dialog.id='oddos-groupes-dialog';dialog.setAttribute('aria-label',label);
- var close=document.createElement('button');close.type='button';close.setAttribute('aria-label',en?'Close form':'Fermer le formulaire');close.textContent='×';
+ var close=document.createElement('button');close.type='button';close.setAttribute('aria-label',en?'Close form':'Fermer le formulaire');close.textContent='\u00d7';
  var frame=document.createElement('iframe');frame.title=label;frame.setAttribute('loading','lazy');
  dialog.append(close,frame);document.body.appendChild(dialog);
  close.addEventListener('click',function(){dialog.close()});
@@ -31,3 +31,17 @@ function init(){
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
 </script>
+<style id="oddos-desktop-navigation-finish">
+@media(min-width:761px){
+.vv-mobile-tabs>summary,.vv-mobiletabs>summary,.lmp-mobiletabs>summary{width:94px!important;height:180px!important;min-height:180px!important;padding:0!important;display:flex!important;align-items:center!important;justify-content:center!important;font-size:28px!important;line-height:1.5!important;letter-spacing:4px!important;border-radius:0 24px 24px 0!important}
+.vv-mobile-tabs>summary{height:192.72px!important;min-height:192.72px!important}
+.vv-mobile-tabs nav,.vv-mobiletabs nav,.lmp-mobiletabs nav{left:94px!important}
+#vv-home header.vv-top,#lmp-home .lmp-top{display:flex!important;justify-content:flex-start!important;gap:16px!important;padding-right:104px!important}
+#vv-home header.vv-top>a,#lmp-home .lmp-top>a{margin-right:auto!important;flex-shrink:0!important}
+#vv-home header.vv-top>nav,#lmp-home .lmp-top>nav{display:flex!important;flex:0 0 auto!important;width:auto!important;margin-left:0!important;justify-content:flex-end!important;gap:16px!important}
+#vv-home header.vv-top .vv-socials{position:static!important;inset:auto!important;transform:none!important;margin-left:0!important;flex:0 0 auto!important}
+#lmp-home .lmp-top nav>.lmp-social-icons{position:static!important;inset:auto!important;transform:none!important;margin:0!important;flex:0 0 auto!important;align-self:center!important}
+#lmp-home .lmp-top>.lmp-mobile-social{display:none!important}
+nav.oddos-compact-menu{margin-left:auto!important;gap:16px!important}
+}
+</style>
