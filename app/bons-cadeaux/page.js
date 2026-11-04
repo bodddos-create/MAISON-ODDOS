@@ -27,6 +27,7 @@ export default function Bons() {
     [from, setFrom] = useState(parisDay(startsAt)),
     [to, setTo] = useState(parisDay()),
     [entries, setEntries] = useState([]),
+    [gifts, setGifts] = useState([]),
     [search, setSearch] = useState(""),
     [status, setStatus] = useState("all"),
     [error, setError] = useState(""),
@@ -49,6 +50,7 @@ export default function Bons() {
         d = await r.json();
       if (!r.ok) throw Error(d.error);
       setEntries(d.entries);
+      setGifts(d.gifts || []);
       setDaily(d.daily || []);
     } catch (e) {
       setError(e.message);
@@ -126,7 +128,7 @@ export default function Bons() {
     if (
       kind === "redeem" &&
       !window.confirm(
-        `${entry.name}\n${prizes.find((p) => p.id === entry.prize)?.label}\nConfirmer la remise de ce cadeau ? Le code sera définitivement marqué utilisé.`,
+        `${entry.name}\n${entry.label || prizes.find((p) => p.id === entry.prize)?.label}\nConfirmer la remise de ce cadeau ? Le code sera définitivement marqué utilisé.`,
       )
     )
       return;
@@ -143,7 +145,7 @@ export default function Bons() {
             Authorization: `Bearer ${t}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ id: entry.id, action: kind }),
+          body: JSON.stringify({ id: entry.id, action: kind, kind: entry.kind || "game" }),
         }),
         d = await r.json();
       if (!r.ok) throw Error(d.error);
@@ -200,14 +202,15 @@ export default function Bons() {
     a.click();
     URL.revokeObjectURL(url);
   }
-  const shown = entries.filter(
+  const allEntries = [...gifts, ...entries];
+  const shown = allEntries.filter(
     (e) =>
       (status === "all" || statusOf(e) === status) &&
       normalize([e.name, e.email, e.code].join(" ")).includes(
         normalize(search),
       ),
   );
-  const scannedEntry = entries.find(e => e.code === scannedCode);
+  const scannedEntry = allEntries.find(e => e.code === scannedCode);
   const invalidScan = scannedCode && !loading && !error && (!scannedEntry || statusOf(scannedEntry) !== "available");
   const analysis = gameStatistics(daily, entries, from, to);
   const peak = Math.max(1, ...analysis.days.map(d => d.plays));
@@ -290,6 +293,15 @@ export default function Bons() {
                 </table>
                 {!analysis.plays && <p>Aucune partie enregistrée sur cette période.</p>}
               </div>}
+            </section>
+            <section aria-label="Bons cadeaux offerts">
+              <h2>Bons cadeaux offerts</h2>
+              <div className="stats">
+                <div><strong>{gifts.length}</strong><span>bons cadeaux enregistrés</span></div>
+                <div><strong>{gifts.filter(e => statusOf(e) === "available").length}</strong><span>disponibles</span></div>
+                <div><strong>{gifts.filter(e => e.used_at).length}</strong><span>utilisés</span></div>
+              </div>
+              <p>Les bons cadeaux offerts sont suivis séparément des lots du jeu. Scannez le QR code ou recherchez le nom de la personne qui l’offre ci-dessous.</p>
             </section>
             <h2>Stock et suivi des cadeaux — toute la campagne</h2>
             <div className="stats">
@@ -404,7 +416,7 @@ export default function Bons() {
                           <br />
                           {e.email}
                         </td>
-                        <td>{prizes.find((p) => p.id === e.prize)?.label}</td>
+                        <td>{e.label || prizes.find((p) => p.id === e.prize)?.label}</td>
                         <td>
                           <code style={{ overflowWrap: "anywhere" }}>
                             {e.code}
@@ -416,12 +428,12 @@ export default function Bons() {
                           })}
                         </td>
                         <td>
-                          {e.email_status === "sent"
+                          {e.kind === "gift" ? "Bon numérique" : e.email_status === "sent"
                             ? "Envoyé"
                             : e.email_status === "failed"
                               ? "Échec de l’envoi"
                               : "En attente"}
-                          {e.email_status !== "sent" && (
+                          {e.kind !== "gift" && e.email_status !== "sent" && (
                             <button
                               disabled={busy}
                               onClick={() => action(e, "resend")}
@@ -435,7 +447,7 @@ export default function Bons() {
                             `Utilisé le ${new Date(e.used_at).toLocaleString("fr-FR", { timeZone: "Europe/Paris" })}`
                           ) : statusOf(e) === "expired" ? (
                             "Expiré"
-                          ) : !canRedeem() ? (
+                          ) : e.kind !== "gift" && !canRedeem() ? (
                             "Utilisable à partir du mardi 27 octobre 2026"
                           ) : (
                             <button

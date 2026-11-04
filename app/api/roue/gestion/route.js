@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   campaign,
+  establishmentId,
   config,
   sameOrigin,
   requestDb,
@@ -22,11 +23,14 @@ export async function GET(req) {
       c,
       `wheel_entries?campaign=eq.${campaign}&select=id,email,name,prize,code,consent,consent_text,created_at,expires_at,used_at,email_status&order=created_at.desc&limit=100`,
     );
+    const gifts = await requestDb(c,
+      `gift_vouchers?establishment_id=eq.${establishmentId}&select=id,code,name,label,created_at,expires_at,used_at&order=created_at.desc&limit=1000`,
+    );
     const daily = await requestDb(c,
       `wheel_daily_stats?campaign=eq.${campaign}&select=day,plays,wins&order=day.asc&limit=366`,
     );
     return NextResponse.json(
-      { entries, daily },
+      { entries, daily, gifts: gifts.map(g => ({ ...g, kind: "gift", email: "", consent: false })) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch {
@@ -53,6 +57,18 @@ export async function PATCH(req) {
       !["redeem", "resend"].includes(data?.action)
     )
       return NextResponse.json({ error: "Action invalide." }, { status: 400 });
+    if (data.kind === "gift") {
+      if (data.action !== "redeem")
+        return NextResponse.json({ error: "Action invalide pour un bon cadeau." }, { status: 400 });
+      const rows = await requestDb(c,
+        `gift_vouchers?establishment_id=eq.${establishmentId}&id=eq.${data.id}&used_at=is.null&expires_at=gt.${encodeURIComponent(new Date().toISOString())}`,
+        { method: "PATCH", headers: { Prefer: "return=representation" },
+          body: JSON.stringify({ used_at: new Date().toISOString(), used_by: user.id }) },
+      );
+      return NextResponse.json({ updated: rows.length === 1 }, { headers: { "Cache-Control": "no-store" } });
+    }
+    if (data.kind && data.kind !== "game")
+      return NextResponse.json({ error: "Type de bon invalide." }, { status: 400 });
     if (data.action === "redeem") {
       if (!canRedeem())
         return NextResponse.json(
