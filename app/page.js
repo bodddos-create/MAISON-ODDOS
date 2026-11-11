@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
+import ClockManager from "./ClockManager";
 import { createClient } from "@supabase/supabase-js";
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -1021,6 +1022,7 @@ export default function Home() {
             {[
               ["salaries", "Salariés"],
               ["heures", "Heures"],
+              ["pointeuse", "Pointeuse"],
               ["synthese", "Synthèse"],
             ].map(([k, l]) => (
               <button
@@ -1166,6 +1168,7 @@ export default function Home() {
               />
             </>
           )}
+          {personnelView === "pointeuse" && <ClockManager sb={sb} employees={employees} />}
           {personnelView === "heures" && (
             <>
               <div className="formCard" style={{ maxWidth: 700 }}>

@@ -18,6 +18,7 @@ const sb = createClient(
 );
 
 const isPublicPage = (pathname) =>
+  pathname === "/pointage" ||
   pathname === "/groupes" ||
   pathname === "/jeu" ||
   pathname.startsWith("/jeu/") ||
