@@ -599,3 +599,41 @@ body>main .brandLogo,main:not(.dashboardMain) .brandLogo{
   .actionItem{grid-template-columns:38px minmax(0,1fr)}
   .actionItem>b{display:none}
 }
+
+
+/* Sélection indépendante des deux restaurants */
+.restaurantSwitch{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:4px;
+  border:1px solid var(--line);
+  border-radius:15px;
+  background:rgba(255,253,248,.9)
+}
+.restaurantSwitch button{
+  min-height:42px;
+  padding:9px 15px;
+  border:0;
+  border-radius:11px;
+  background:transparent;
+  color:var(--ink);
+  box-shadow:none;
+  white-space:nowrap
+}
+.restaurantSwitch button:hover{background:#efede5}
+.restaurantSwitch button.active{
+  background:var(--olive);
+  color:#fff
+}
+@media(max-width:900px){
+  .topbar{flex-wrap:wrap}
+  .topbarControls{width:100%;justify-content:space-between}
+  .restaurantSwitch{flex:1}
+  .restaurantSwitch button{flex:1}
+  .quickEntry{display:none!important}
+}
+@media(max-width:560px){
+  .restaurantSwitch{gap:4px;padding:3px}
+  .restaurantSwitch button{padding:8px 7px;font-size:12px}
+}
