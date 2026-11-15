@@ -647,7 +647,7 @@ export default function Home() {
             className="formCard"
             style={{ maxWidth: 460, margin: "70px auto", padding: 28 }}
           >
-            <div className="brand">MAISON ODDOS</div>
+            <img className="brandLogo" src="/maison-oddos-logo.svg" alt="Maison Oddos Restaurants" />
             <h1>Pilotage Restaurants</h1>
             <form
               onSubmit={login}
@@ -768,7 +768,7 @@ export default function Home() {
     <main>
       <header>
         <div>
-          <div className="brand">MAISON ODDOS</div>
+          <img className="brandLogo" src="/maison-oddos-logo.svg" alt="Maison Oddos Restaurants" />
           <h1>Pilotage Restaurants</h1>
         </div>
         <div className="user">
