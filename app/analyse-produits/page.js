@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import PilotageFrame from "../PilotageFrame";
 
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -380,15 +381,11 @@ export default function AnalyseProduitsPage() {
   const selected = runs.find((run) => run.id === selectedRun);
 
   return (
-    <main>
-      <header>
-        <div>
-          <div className="brand">MAISON ODDOS</div>
-          <h1>Analyse produits</h1>
-          <p>Classement des plats, formules et boissons à partir des Z détaillés.</p>
-        </div>
-        <a href="/" onClick={resetView}><button>← Pilotage</button></a>
-      </header>
+    <PilotageFrame
+      current="analyse-produits"
+      title="Analyse produits"
+      subtitle="Classement des plats, formules et boissons à partir des Z détaillés."
+    >
 
       <section>
         <div className="formCard">
@@ -597,6 +594,7 @@ export default function AnalyseProduitsPage() {
           </table>
         </div>
       </section>
-    </main>
+
+    </PilotageFrame>
   );
 }
