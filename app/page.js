@@ -2,6 +2,9 @@
 import { useEffect, useMemo, useState } from "react";
 import ClockManager from "./ClockManager";
 import { createClient } from "@supabase/supabase-js";
+const VILLA_ID = "8395bf22-99cb-4a7b-9096-ca734d583d83";
+const PARC_ID = "55c6e880-aa0c-40d6-9065-b5315b1a602a";
+
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
   "sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE",
@@ -78,7 +81,7 @@ export default function Home() {
     [hours, setHours] = useState([]),
     [openingDays, setOpeningDays] = useState([]),
     [tab, setTab] = useState("direction"),
-    [selectedEst, setSelectedEst] = useState("all");
+    [selectedEst, setSelectedEst] = useState(VILLA_ID);
   const [commercialForecast, setCommercialForecast] = useState({ total: 0, count: 0, loading: true, error: false });
   const [entryType, setEntryType] = useState("z"),
     [personnelView, setPersonnelView] = useState("salaries"),
@@ -144,7 +147,7 @@ export default function Home() {
     setCommercialForecast((current) => ({ ...current, loading: true, error: false }));
     async function refreshCommercialForecast() {
       const { data, error } = await sb.rpc("commercial_future_total", {
-        p_establishment_id: selectedEst === "all" ? null : selectedEst,
+        p_establishment_id: selectedEst,
       }).single();
       if (!active) return;
       setCommercialForecast(error || !data
@@ -454,26 +457,11 @@ export default function Home() {
     setHour((v) => ({ ...v, hours_worked: "", note: "" }));
     await load();
   }
-  const fs =
-      selectedEst === "all"
-        ? sales
-        : sales.filter((x) => x.establishment_id === selectedEst),
-    fi =
-      selectedEst === "all"
-        ? invoices
-        : invoices.filter((x) => x.establishment_id === selectedEst),
-    fc =
-      selectedEst === "all"
-        ? charges
-        : charges.filter((x) => x.establishment_id === selectedEst),
-    fe =
-      selectedEst === "all"
-        ? employees
-        : employees.filter((x) => x.establishment_id === selectedEst),
-    fh =
-      selectedEst === "all"
-        ? hours
-        : hours.filter((x) => x.establishment_id === selectedEst);
+  const fs = sales.filter((x) => x.establishment_id === selectedEst),
+    fi = invoices.filter((x) => x.establishment_id === selectedEst),
+    fc = charges.filter((x) => x.establishment_id === selectedEst),
+    fe = employees.filter((x) => x.establishment_id === selectedEst),
+    fh = hours.filter((x) => x.establishment_id === selectedEst);
   const totals = useMemo(() => {
     const periodSales = fs.filter((x) =>
         String(x.business_date || "").startsWith(chartMonth),
@@ -512,7 +500,7 @@ export default function Home() {
       ),
       fixes = periodCharges.reduce((a, x) => a + Number(x.amount || 0), 0),
       ym = chartMonth,
-      ids = selectedEst === "all" ? ests.map((e) => e.id) : [selectedEst],
+      ids = [selectedEst],
       habitualOpen = (id, date) => {
         const d = date.getDay();
         return id === "8395bf22-99cb-4a7b-9096-ca734d583d83"
@@ -559,53 +547,7 @@ export default function Home() {
           .map((x) => x.business_date),
       ).size,
       avgDay = actualDays ? ca / actualDays : 0,
-      forecast =
-        selectedEst === "all"
-          ? ids.reduce((sum, id) => {
-              const estSales = fs.filter(
-                  (x) =>
-                    x.establishment_id === id &&
-                    String(x.business_date).startsWith(ym),
-                ),
-                estCa = estSales.reduce(
-                  (a, x) =>
-                    a +
-                    Number(x.lunch_sales_ht || 0) +
-                    Number(x.dinner_sales_ht || 0),
-                  0,
-                ),
-                estActual = new Set(
-                  estSales
-                    .filter(
-                      (x) =>
-                        Number(x.lunch_sales_ht || 0) +
-                          Number(x.dinner_sales_ht || 0) >
-                        0,
-                    )
-                    .map((x) => x.business_date),
-                ).size,
-                custom = openingDays.filter(
-                  (x) =>
-                    x.establishment_id === id &&
-                    String(x.business_date).startsWith(ym),
-                ),
-                by = Object.fromEntries(
-                  custom.map((x) => [
-                    String(x.business_date).slice(0, 10),
-                    !!x.is_open,
-                  ]),
-                );
-              let estOpen = 0;
-              for (let d = 1; d <= daysInMonth; d++) {
-                const ds = ym + "-" + String(d).padStart(2, "0");
-                if (
-                  ds in by ? by[ds] : habitualOpen(id, new Date(yy, mm - 1, d))
-                )
-                  estOpen++;
-              }
-              return sum + (estActual ? (estCa / estActual) * estOpen : 0);
-            }, 0)
-          : avgDay * workDays;
+      forecast = avgDay * workDays;
     return {
       ca,
       covers,
@@ -860,18 +802,18 @@ export default function Home() {
 
   const dashboardItems = [
     ["direction", "⌂", "Vue d’ensemble"],
-    ["saisie", "＋", "Saisie manuelle"],
     ["personnel", "♙", "Personnel"],
     ["factures", "▤", "Factures & avoirs"],
-    ["stocks", "◫", "Stocks"],
-    ["charges", "€", "Charges"],
-    ["historique", "◷", "Historique"],
+    ["historique", "Z", "Z"],
     ["evolution-ca", "↗", "Évolution du CA"],
     ["analyse-produits", "◇", "Analyse produits"],
+    ["visites-sites", "◫", "Visites site web"],
     ["reservations", "◷", "Réservations"],
     ["demandes-groupes", "◇", "Groupes & privatisation"],
-    ["visites-sites", "◫", "Visites des sites"],
+    ["charges", "€", "Charges"],
+    ["stocks", "◫", "Stocks"],
     ["bons-cadeaux", "□", "Bons cadeaux · Scan QR"],
+    ["saisie", "＋", "Saisie manuelle"],
   ];
 
   const openDashboardItem = (key) => {
@@ -938,21 +880,20 @@ export default function Home() {
           </div>
 
           <div className="topbarControls">
-            <select
-              className="establishmentSelect"
-              value={selectedEst}
-              onChange={(event) => setSelectedEst(event.target.value)}
-            >
-              <option value="all">Consolidé Maison Oddos</option>
-              {ests.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-            <button className="quickEntry" onClick={() => openDashboardItem("saisie")}>
-              ＋ Saisie rapide
-            </button>
+            <div className="restaurantSwitch" aria-label="Choisir le restaurant">
+              <button
+                className={selectedEst === VILLA_ID ? "active" : ""}
+                onClick={() => setSelectedEst(VILLA_ID)}
+              >
+                Villa Valleyre
+              </button>
+              <button
+                className={selectedEst === PARC_ID ? "active" : ""}
+                onClick={() => setSelectedEst(PARC_ID)}
+              >
+                Maison du Parc
+              </button>
+            </div>
             <div className="avatar" title={user.email}>BO</div>
           </div>
         </header>
@@ -962,7 +903,7 @@ export default function Home() {
             <div>
               <p>
                 Chiffre d’affaires du mois ·{" "}
-                {selectedEst === "all" ? "Consolidé" : name(selectedEst)}
+                {name(selectedEst)}
               </p>
               <strong>{euro(totals.ca)}</strong>
             </div>
@@ -1132,53 +1073,6 @@ export default function Home() {
             </article>
           </div>
 
-          <article className="overviewPanel recentZPanel">
-            <div className="panelHead">
-              <h2>Derniers Z enregistrés</h2>
-              <span className="metricBadge">Automatique</span>
-            </div>
-            {documentMsg && <p><b>{documentMsg}</b></p>}
-            <Table
-              rows={fs.slice(0, 8).map((item) => [
-                item.business_date,
-                name(item.establishment_id),
-                euro(
-                  Number(item.lunch_sales_ht || 0) +
-                    Number(item.dinner_sales_ht || 0),
-                ),
-                Number(item.lunch_covers || 0) +
-                  Number(item.dinner_covers || 0),
-                item.z_scan_status || "manual",
-                archivedZ(item) ? (
-                  <div className="documentActions">
-                    <button
-                      onClick={() => viewZDocument(item)}
-                      disabled={documentBusy}
-                    >
-                      Voir
-                    </button>
-                    <button
-                      className="secondary"
-                      onClick={() => emailZDocument(item)}
-                      disabled={documentBusy}
-                    >
-                      Envoyer
-                    </button>
-                  </div>
-                ) : (
-                  "—"
-                ),
-              ])}
-              heads={[
-                "Date",
-                "Établissement",
-                "CA HT",
-                "Couverts",
-                "Statut",
-                "Document",
-              ]}
-            />
-          </article>
         </section>
       )}
       {tab === "saisie" && (
@@ -1759,7 +1653,7 @@ export default function Home() {
       <nav className="mobileNav" aria-label="Navigation mobile">
         {dashboardItems
           .filter(([key]) =>
-            ["direction", "saisie", "factures", "reservations", "personnel"].includes(key),
+            ["direction", "personnel", "factures", "historique", "evolution-ca"].includes(key),
           )
           .map(([key, icon, label]) => (
             <button
