@@ -681,3 +681,26 @@ nav.dashboard-tabs a.active{background:var(--olive);color:#fff}
   font-size:19px
 }
 .mobileNav a.active{color:var(--olive);font-weight:800}
+
+
+/* Bandeau mobile Maison Oddos pleine largeur */
+@media(max-width:900px){
+  .topbar>div:first-child{width:100%}
+  .mobileLogo{
+    width:calc(100% + 28px);
+    max-width:none;
+    height:96px;
+    margin:-14px -14px 16px;
+    padding:14px 20px;
+    border-radius:0;
+    background:var(--ink);
+    object-fit:contain
+  }
+}
+@media(max-width:560px){
+  .mobileLogo{
+    width:calc(100% + 24px);
+    height:92px;
+    margin:-12px -12px 15px
+  }
+}
