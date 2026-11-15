@@ -142,6 +142,18 @@ export default function Home() {
     if (user) load();
   }, [user]);
   useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    if (
+      requestedTab &&
+      ["direction", "personnel", "factures", "historique", "charges", "stocks", "saisie"].includes(
+        requestedTab,
+      )
+    ) {
+      setTab(requestedTab);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!user || tab !== "direction") return undefined;
     let active = true;
     setCommercialForecast((current) => ({ ...current, loading: true, error: false }));
