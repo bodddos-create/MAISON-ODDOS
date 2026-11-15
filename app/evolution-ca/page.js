@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import PilotageFrame from "../PilotageFrame";
 
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -443,17 +444,11 @@ export default function EvolutionCA() {
   const rate = previous.ca ? (gap / previous.ca) * 100 : null;
 
   return (
-    <main>
-      <header>
-        <div>
-          <div className="brand">MAISON ODDOS</div>
-          <h1>Évolution du chiffre d’affaires</h1>
-        </div>
-
-        <a href="/">
-          <button>← Pilotage</button>
-        </a>
-      </header>
+    <PilotageFrame
+      current="evolution-ca"
+      title="Évolution du chiffre d’affaires"
+      subtitle="Comparaison des performances et des années précédentes."
+    >
       <section>
         <div className="formCard" style={{ marginBottom: 22 }}>
           <div className="grid">
@@ -689,6 +684,7 @@ export default function EvolutionCA() {
           </small>
         </p>
       </section>
-    </main>
+
+    </PilotageFrame>
   );
 }
