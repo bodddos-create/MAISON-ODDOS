@@ -7,7 +7,6 @@ import InvoiceTabRouter from "./InvoiceTabRouter";
 import TTCDisplayEnhancer from "./TTCDisplayEnhancer";
 import PersonnelDailyCost from "./PersonnelDailyCost";
 import PersonnelManager from "./PersonnelManager";
-import VatFloatingButton from "./VatFloatingButton";
 import DirectionFinanceChart from "./DirectionFinanceChart";
 import DirectionVatSummary from "./DirectionVatSummary";
 import OpeningCalendar from "./OpeningCalendar";
@@ -110,7 +109,6 @@ export default function AppShell({ children }) {
         </>
       )}
       {children}
-      {management && pathname !== "/groupes" && pathname !== "/reservations" && <VatFloatingButton />}
     </>
   );
 }
