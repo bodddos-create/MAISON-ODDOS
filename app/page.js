@@ -764,68 +764,111 @@ export default function Home() {
       ))}
     </select>
   );
+  const todayLabel = new Intl.DateTimeFormat("fr-FR", {
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
+
+  const dashboardItems = [
+    ["direction", "⌂", "Vue d’ensemble"],
+    ["saisie", "＋", "Saisie manuelle"],
+    ["personnel", "♙", "Personnel"],
+    ["factures", "▤", "Factures & avoirs"],
+    ["stocks", "◫", "Stocks"],
+    ["charges", "€", "Charges"],
+    ["historique", "◷", "Historique"],
+    ["evolution-ca", "↗", "Évolution du CA"],
+    ["analyse-produits", "◇", "Analyse produits"],
+    ["reservations", "◷", "Réservations"],
+    ["demandes-groupes", "◇", "Groupes & privatisation"],
+    ["visites-sites", "◫", "Visites des sites"],
+    ["bons-cadeaux", "□", "Bons cadeaux · Scan QR"],
+  ];
+
+  const openDashboardItem = (key) => {
+    if (
+      [
+        "evolution-ca",
+        "analyse-produits",
+        "reservations",
+        "bons-cadeaux",
+        "demandes-groupes",
+        "visites-sites",
+      ].includes(key)
+    ) {
+      window.location.href = `/${key}`;
+      return;
+    }
+
+    setTab(key);
+    setSaveMsg("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
-    <main>
-      <header>
-        <div>
-          <img className="brandLogo" src="/maison-oddos-logo.svg" alt="Maison Oddos Restaurants" />
-          <h1>Pilotage Restaurants</h1>
+    <div className="appShell">
+      <aside className="dashboardSidebar">
+        <div className="sideBrand">
+          <img
+            src="/maison-oddos-logo.svg"
+            alt="Maison Oddos Restaurants"
+          />
+          <small>Espace de pilotage</small>
         </div>
-        <div className="user">
-          <b>{user.email}</b>
+
+        <nav className="dashboard-tabs" aria-label="Rubriques de pilotage">
+          {dashboardItems.map(([key, icon, label]) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={() => openDashboardItem(key)}
+            >
+              <span className="navIcon">{icon}</span>
+              <span>{label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="sidebarFoot">
+          <strong>Bruno Oddos</strong>
+          <span>Direction Maison Oddos</span>
           <button onClick={logout}>Déconnexion</button>
         </div>
-      </header>
-      <section style={{ paddingTop: 16, paddingBottom: 0 }}>
-        <div className="formCard" style={{ padding: 16 }}>
-          <Field label="Établissement">
+      </aside>
+
+      <main className="dashboardMain">
+        <header className="topbar">
+          <div>
+            <img
+              className="mobileLogo"
+              src="/maison-oddos-logo.svg"
+              alt="Maison Oddos Restaurants"
+            />
+            <div className="eyebrow">{todayLabel}</div>
+            <h1>Bonjour Bruno</h1>
+          </div>
+
+          <div className="topbarControls">
             <select
+              className="establishmentSelect"
               value={selectedEst}
-              onChange={(e) => setSelectedEst(e.target.value)}
-              style={inputStyle}
+              onChange={(event) => setSelectedEst(event.target.value)}
             >
-              <option value="all">CONSOLIDÉ — Tous les établissements</option>
-              {ests.map((x) => (
-                <option key={x.id} value={x.id}>
-                  {x.name}
+              <option value="all">Consolidé Maison Oddos</option>
+              {ests.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
                 </option>
               ))}
             </select>
-          </Field>
-        </div>
-      </section>
-      <nav className="dashboard-tabs" aria-label="Rubriques de pilotage">
-        {[
-          ["direction", "Direction"],
-          ["saisie", "Saisie manuelle"],
-          ["personnel", "Personnel"],
-          ["factures", "Factures / Avoirs"],
-          ["stocks", "Stocks"],
-          ["charges", "Charges"],
-          ["historique", "Historique"],
-          ["evolution-ca", "Évolution du CA"],
-          ["analyse-produits", "Analyse produits"],
-          ["reservations", "Réservations"],
-          ["demandes-groupes", "Groupes & privatisation"],
-          ["visites-sites", "Visites des sites"],
-          ["bons-cadeaux", "Bons cadeaux · Scan QR"],
-        ].map(([k, l]) => (
-          <button
-            key={k}
-            className={tab === k ? "active" : ""}
-            onClick={() => {
-              if (["evolution-ca", "analyse-produits", "reservations", "bons-cadeaux", "demandes-groupes", "visites-sites"].includes(k)) {
-                window.location.href = `/${k}`;
-                return;
-              }
-              setTab(k);
-              setSaveMsg("");
-            }}
-          >
-            {l}
-          </button>
-        ))}
-      </nav>
+            <button className="quickEntry" onClick={() => openDashboardItem("saisie")}>
+              ＋ Saisie rapide
+            </button>
+            <div className="avatar" title={user.email}>BO</div>
+          </div>
+        </header>
       {tab === "direction" && (
         <section>
           <div className="hero">
@@ -1557,7 +1600,25 @@ export default function Home() {
           />
         </section>
       )}
-    </main>
+      </main>
+
+      <nav className="mobileNav" aria-label="Navigation mobile">
+        {dashboardItems
+          .filter(([key]) =>
+            ["direction", "saisie", "factures", "reservations", "personnel"].includes(key),
+          )
+          .map(([key, icon, label]) => (
+            <button
+              key={key}
+              className={tab === key ? "active" : ""}
+              onClick={() => openDashboardItem(key)}
+            >
+              <span>{icon}</span>
+              {key === "direction" ? "Accueil" : label.split(" ")[0]}
+            </button>
+          ))}
+      </nav>
+    </div>
   );
 }
 function buildChartData(view, month, year, sales, invoices, charges, hours) {
