@@ -764,6 +764,93 @@ export default function Home() {
       ))}
     </select>
   );
+  const formatLocalDate = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(
+      date.getDate(),
+    ).padStart(2, "0")}`;
+
+  const currentBusinessDate = today();
+  const todaySales = fs.filter(
+    (item) => String(item.business_date || "").slice(0, 10) === currentBusinessDate,
+  );
+  const todayCa = todaySales.reduce(
+    (sum, item) =>
+      sum + Number(item.lunch_sales_ht || 0) + Number(item.dinner_sales_ht || 0),
+    0,
+  );
+  const todayCovers = todaySales.reduce(
+    (sum, item) =>
+      sum + Number(item.lunch_covers || 0) + Number(item.dinner_covers || 0),
+    0,
+  );
+
+  const lastSevenDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date();
+    date.setHours(12, 0, 0, 0);
+    date.setDate(date.getDate() - (6 - index));
+    const iso = formatLocalDate(date);
+    const salesForDay = fs.filter(
+      (item) => String(item.business_date || "").slice(0, 10) === iso,
+    );
+    const invoicesForDay = fi.filter(
+      (item) => String(item.invoice_date || "").slice(0, 10) === iso,
+    );
+    const ca = salesForDay.reduce(
+      (sum, item) =>
+        sum + Number(item.lunch_sales_ht || 0) + Number(item.dinner_sales_ht || 0),
+      0,
+    );
+    const costs =
+      salesForDay.reduce((sum, item) => sum + Number(item.staff_cost || 0), 0) +
+      invoicesForDay.reduce(
+        (sum, item) =>
+          sum +
+          (item.document_type === "credit_note" ? -1 : 1) *
+            Number(item.amount_ht || 0),
+        0,
+      );
+
+    return {
+      iso,
+      label: date
+        .toLocaleDateString("fr-FR", { weekday: "short" })
+        .replace(".", ""),
+      ca: Math.max(0, ca),
+      costs: Math.max(0, costs),
+    };
+  });
+  const activityMaximum = Math.max(
+    1,
+    ...lastSevenDays.flatMap((item) => [item.ca, item.costs]),
+  );
+
+  const [selectedYear, selectedMonth] = chartMonth.split("-").map(Number);
+  const previousMonthDate = new Date(Date.UTC(selectedYear, selectedMonth - 2, 1));
+  const previousMonthKey = `${previousMonthDate.getUTCFullYear()}-${String(
+    previousMonthDate.getUTCMonth() + 1,
+  ).padStart(2, "0")}`;
+  const previousMonthCa = fs
+    .filter((item) => String(item.business_date || "").startsWith(previousMonthKey))
+    .reduce(
+      (sum, item) =>
+        sum + Number(item.lunch_sales_ht || 0) + Number(item.dinner_sales_ht || 0),
+      0,
+    );
+  const caTrend = previousMonthCa
+    ? ((totals.ca - previousMonthCa) / previousMonthCa) * 100
+    : null;
+  const purchaseRate = totals.ca ? (totals.achats / totals.ca) * 100 : 0;
+  const invoicesToReview = fi.filter((item) =>
+    ["analyzed", "needs_review", "uncertain"].includes(
+      String(item.scan_status || "").toLowerCase(),
+    ),
+  ).length;
+  const zToReview = fs.filter((item) =>
+    ["analyzed", "needs_review"].includes(
+      String(item.z_scan_status || "").toLowerCase(),
+    ),
+  ).length;
+
   const todayLabel = new Intl.DateTimeFormat("fr-FR", {
     weekday: "long",
     day: "numeric",
@@ -870,161 +957,228 @@ export default function Home() {
           </div>
         </header>
       {tab === "direction" && (
-        <section>
+        <section className="overviewPage">
           <div className="hero">
             <div>
-              <span>
-                {selectedEst === "all"
-                  ? "Situation consolidée"
-                  : name(selectedEst)}
-              </span>
-              <h2>{euro(totals.ca)}</h2>
-              <small>Chiffre d’affaires HT enregistré</small>
+              <p>
+                Chiffre d’affaires du mois ·{" "}
+                {selectedEst === "all" ? "Consolidé" : name(selectedEst)}
+              </p>
+              <strong>{euro(totals.ca)}</strong>
             </div>
-            <div className="result">
-              <span>Résultat estimé fin de mois HT</span>
-              <strong>{euro(totals.result)}</strong>
-            </div>
-          </div>
-          <div className="grid">
-            <Card
-              t="CA estimé sur jours d’ouverture"
-              v={euro(totals.forecast)}
-            />
-            <Card
-              t="Jours d’ouverture · Cliquez pour choisir"
-              v={`${totals.workDays} jours`}
-            />
-            <Card t="CA moyen / jour" v={euro(totals.avgDay)} />
-            <Card t="Couverts" v={totals.covers} />
-            <Card
-              t="Ticket moyen"
-              v={euro(totals.covers ? totals.ca / totals.covers : 0)}
-            />
-            <Card t="Achats" v={euro(totals.achats)} />
-            <Card t="Personnel" v={euro(totals.personnel)} />
-            <Card t="Charges fixes" v={euro(totals.fixes)} />
-            <Card t="Marge à ce jour HT" v={euro(totals.result)} />
-            <article
-              className="card"
-              data-daily-fixed-personnel="true"
-              style={{ background: "#48633a", color: "#fff", border: "none" }}
-            >
-              <span style={{ color: "#fff" }}>Charges + personnel / jour</span>
-              <strong style={{ color: "#fff" }}>Calcul…</strong>
-            </article>
-            <article
-              className="card"
-              data-daily-cost="true"
-              style={{ background: "#b42318", color: "#fff", border: "none" }}
-            >
-              <span style={{ color: "#fff" }}>Coût journalier</span>
-              <strong style={{ color: "#fff" }}>Calcul…</strong>
-            </article>
-            <article
-              className="card"
-              style={{ background: "#e9f0e5", borderColor: "#bcd0b8", color: "#294a2c" }}
-            >
-              <span>Prestations vendues à venir</span>
-              <strong>{commercialForecast.loading ? "Chargement…" : commercialForecast.error ? "Indisponible" : euro(commercialForecast.total)}</strong>
-              {!commercialForecast.loading && !commercialForecast.error && <small style={{ color: "#426448" }}>
-                Service commercial · {commercialForecast.count} prestation{commercialForecast.count > 1 ? "s" : ""} confirmée{commercialForecast.count > 1 ? "s" : ""} · TTC
-              </small>}
-            </article>
-          </div>
-          <div className="formCard" style={{ marginTop: 22 }}>
             <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: 12,
-                flexWrap: "wrap",
-                alignItems: "end",
-              }}
+              className={`heroTrend ${
+                caTrend != null && caTrend < 0 ? "negative" : ""
+              }`}
             >
-              <div>
-                <h3 style={{ marginBottom: 4 }}>Évolution CA / Charges</h3>
-                <small>
-                  Charges = achats + personnel + charges fixes. La ligne Écart
-                  représente CA − charges.
-                </small>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  alignItems: "end",
-                  flexWrap: "wrap",
-                }}
-              >
-                <button
-                  className={chartView === "month" ? "active" : ""}
-                  onClick={() => setChartView("month")}
-                >
-                  Vue du mois
-                </button>
-                <button
-                  className={chartView === "year" ? "active" : ""}
-                  onClick={() => setChartView("year")}
-                >
-                  Vue annuelle
-                </button>
-                {chartView === "month" ? (
-                  <input
-                    type="month"
-                    value={chartMonth}
-                    onChange={(e) => setChartMonth(e.target.value)}
-                    style={{ padding: 9 }}
-                  />
-                ) : (
-                  <input
-                    type="number"
-                    min="2020"
-                    max="2100"
-                    value={chartYear}
-                    onChange={(e) => setChartYear(e.target.value)}
-                    style={{ padding: 9, width: 100 }}
-                  />
-                )}
-              </div>
+              {caTrend == null
+                ? "Mois de référence"
+                : `${caTrend >= 0 ? "↗ +" : "↘ "}${caTrend.toLocaleString(
+                    "fr-FR",
+                    { maximumFractionDigits: 1 },
+                  )} % vs mois précédent`}
             </div>
-            <TrendChart data={chartData} />
           </div>
-          <h3>Dernières journées</h3>
-          {documentMsg && (
-            <p>
-              <b>{documentMsg}</b>
-            </p>
-          )}
-          <Table
-            rows={fs.slice(0, 8).map((x) => [
-              x.business_date,
-              name(x.establishment_id),
-              euro(
-                Number(x.lunch_sales_ht || 0) + Number(x.dinner_sales_ht || 0),
-              ),
-              Number(x.lunch_covers || 0) + Number(x.dinner_covers || 0),
-              archivedZ(x) ? (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  <button
-                    onClick={() => viewZDocument(x)}
-                    disabled={documentBusy}
-                  >
-                    Voir le PDF
-                  </button>
-                  <button
-                    onClick={() => emailZDocument(x)}
-                    disabled={documentBusy}
-                  >
-                    Envoyer par e-mail
-                  </button>
+
+          <div className="overviewCards">
+            <article className="overviewCard">
+              <div className="overviewCardHead">
+                <span>CA aujourd’hui</span>
+                <span className="metricBadge">
+                  {totals.avgDay
+                    ? `${((todayCa / totals.avgDay - 1) * 100).toLocaleString(
+                        "fr-FR",
+                        { maximumFractionDigits: 0, signDisplay: "always" },
+                      )} %`
+                    : "Aujourd’hui"}
+                </span>
+              </div>
+              <strong>{euro(todayCa)}</strong>
+              <small>{todayCovers} couverts</small>
+            </article>
+
+            <article className="overviewCard">
+              <div className="overviewCardHead">
+                <span>Achats HT</span>
+                <span className="metricBadge">
+                  {purchaseRate.toLocaleString("fr-FR", {
+                    maximumFractionDigits: 1,
+                  })} %
+                </span>
+              </div>
+              <strong>{euro(totals.achats)}</strong>
+              <small>Objectif inférieur à 30 %</small>
+            </article>
+
+            <article className="overviewCard">
+              <div className="overviewCardHead">
+                <span>Résultat estimé</span>
+                <span className={`metricBadge ${totals.result < 0 ? "danger" : ""}`}>
+                  {totals.result >= 0 ? "Sain" : "À surveiller"}
+                </span>
+              </div>
+              <strong>{euro(totals.result)}</strong>
+              <small>Après charges connues</small>
+            </article>
+
+            <article className="overviewCard">
+              <div className="overviewCardHead">
+                <span>Prestations à venir</span>
+                <span className="metricBadge">Commercial</span>
+              </div>
+              <strong>
+                {commercialForecast.loading
+                  ? "…"
+                  : commercialForecast.error
+                    ? "—"
+                    : euro(commercialForecast.total)}
+              </strong>
+              <small>
+                {commercialForecast.count} prestation
+                {commercialForecast.count > 1 ? "s" : ""} confirmée
+                {commercialForecast.count > 1 ? "s" : ""}
+              </small>
+            </article>
+          </div>
+
+          <div className="overviewLayout">
+            <article className="overviewPanel activityPanel">
+              <div className="panelHead">
+                <h2>Activité des 7 derniers jours</h2>
+                <div className="chartSwitch">
+                  <button className="active">CA</button>
+                  <button>Coûts</button>
                 </div>
-              ) : (
-                "—"
-              ),
-            ])}
-            heads={["Date", "Établissement", "CA HT", "Couverts", "Document Z"]}
-          />
+              </div>
+
+              <div className="activityChart" aria-label="Activité des sept derniers jours">
+                {lastSevenDays.map((item) => (
+                  <div className="activityColumn" key={item.iso}>
+                    <div className="activityBars">
+                      <span
+                        className="activityBar salesBar"
+                        style={{
+                          height: `${Math.max(3, (item.ca / activityMaximum) * 100)}%`,
+                        }}
+                        title={`CA ${euro(item.ca)}`}
+                      />
+                      <span
+                        className="activityBar costBar"
+                        style={{
+                          height: `${Math.max(
+                            2,
+                            (item.costs / activityMaximum) * 100,
+                          )}%`,
+                        }}
+                        title={`Coûts ${euro(item.costs)}`}
+                      />
+                    </div>
+                    <small>{item.label}</small>
+                  </div>
+                ))}
+              </div>
+
+              <div className="chartLegend">
+                <span><i className="legendDot salesDot" />CA HT</span>
+                <span><i className="legendDot costDot" />Coûts</span>
+              </div>
+            </article>
+
+            <article className="overviewPanel actionsPanel">
+              <div className="panelHead">
+                <h2>À traiter</h2>
+                <span className="metricBadge">
+                  {invoicesToReview + zToReview + 2} actions
+                </span>
+              </div>
+
+              <div className="actionList">
+                <button className="actionItem" onClick={() => openDashboardItem("factures")}>
+                  <span className="actionIcon">▤</span>
+                  <span>
+                    <strong>{invoicesToReview} facture{invoicesToReview > 1 ? "s" : ""} à contrôler</strong>
+                    <small>Lectures automatiques à vérifier</small>
+                  </span>
+                  <b>OUVRIR</b>
+                </button>
+
+                <button className="actionItem" onClick={() => openDashboardItem("reservations")}>
+                  <span className="actionIcon">◷</span>
+                  <span>
+                    <strong>Réservations à confirmer</strong>
+                    <small>Consulter le planning</small>
+                  </span>
+                  <b>VOIR</b>
+                </button>
+
+                <button className="actionItem" onClick={() => openDashboardItem("historique")}>
+                  <span className="actionIcon">!</span>
+                  <span>
+                    <strong>{zToReview} Z à vérifier</strong>
+                    <small>Rapports analysés automatiquement</small>
+                  </span>
+                  <b>VÉRIFIER</b>
+                </button>
+
+                <button className="actionItem" onClick={() => openDashboardItem("demandes-groupes")}>
+                  <span className="actionIcon">€</span>
+                  <span>
+                    <strong>{commercialForecast.count} prestation{commercialForecast.count > 1 ? "s" : ""} à venir</strong>
+                    <small>{euro(commercialForecast.total)} vendus</small>
+                  </span>
+                  <b>DÉTAIL</b>
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <article className="overviewPanel recentZPanel">
+            <div className="panelHead">
+              <h2>Derniers Z enregistrés</h2>
+              <span className="metricBadge">Automatique</span>
+            </div>
+            {documentMsg && <p><b>{documentMsg}</b></p>}
+            <Table
+              rows={fs.slice(0, 8).map((item) => [
+                item.business_date,
+                name(item.establishment_id),
+                euro(
+                  Number(item.lunch_sales_ht || 0) +
+                    Number(item.dinner_sales_ht || 0),
+                ),
+                Number(item.lunch_covers || 0) +
+                  Number(item.dinner_covers || 0),
+                item.z_scan_status || "manual",
+                archivedZ(item) ? (
+                  <div className="documentActions">
+                    <button
+                      onClick={() => viewZDocument(item)}
+                      disabled={documentBusy}
+                    >
+                      Voir
+                    </button>
+                    <button
+                      className="secondary"
+                      onClick={() => emailZDocument(item)}
+                      disabled={documentBusy}
+                    >
+                      Envoyer
+                    </button>
+                  </div>
+                ) : (
+                  "—"
+                ),
+              ])}
+              heads={[
+                "Date",
+                "Établissement",
+                "CA HT",
+                "Couverts",
+                "Statut",
+                "Document",
+              ]}
+            />
+          </article>
         </section>
       )}
       {tab === "saisie" && (
