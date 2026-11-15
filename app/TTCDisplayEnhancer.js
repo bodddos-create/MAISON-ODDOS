@@ -96,10 +96,14 @@ export default function TTCDisplayEnhancer() {
         if (stopped) return;
         const main = document.querySelector("main");
         if (!main) return;
-        const estSelect = [...main.querySelectorAll("select")].find((x) =>
-          [...x.options].some((o) => o.textContent?.includes("CONSOLIDÉ")),
+        const selectedRestaurantButton = main.querySelector(
+          ".restaurantSwitch button.active",
         );
-        const est = estSelect?.value || "all";
+        const selectedRestaurantLabel =
+          selectedRestaurantButton?.textContent?.trim() || "Villa Valleyre";
+        const est = selectedRestaurantLabel.includes("Maison du Parc")
+          ? PARC
+          : VILLA;
         const monthInput = main.querySelector('input[type="month"]');
         const ym = monthInput?.value || new Date().toISOString().slice(0, 7);
         const selectedRows =
