@@ -280,6 +280,17 @@ function normalizeBusinessDate(value) {
   return normalized;
 }
 
+function businessDateFromZFilename(value) {
+  const filename = String(value || "").trim();
+  const match = filename.match(/[_-](\d{2}|\d{4})[_-](\d{2})[_-](\d{2})\.pdf$/i);
+
+  if (!match) return "";
+
+  const year = match[1].length === 2 ? `20${match[1]}` : match[1];
+
+  return normalizeBusinessDate(`${year}-${match[2]}-${match[3]}`);
+}
+
 async function saveZReport({ restaurant, filename, documentPath, analysis }) {
   const result = analysis?.result;
 
@@ -287,7 +298,28 @@ async function saveZReport({ restaurant, filename, documentPath, analysis }) {
     throw new Error("Résultat de l’analyse IA absent");
   }
 
-  const businessDate = normalizeBusinessDate(result.date);
+  const analyzedBusinessDate = normalizeBusinessDate(result.date);
+  const filenameBusinessDate = businessDateFromZFilename(filename);
+  const businessDate = filenameBusinessDate || analyzedBusinessDate;
+
+  if (
+    filenameBusinessDate &&
+    analyzedBusinessDate &&
+    filenameBusinessDate !== analyzedBusinessDate
+  ) {
+    console.warn(
+      JSON.stringify({
+        level: "warning",
+        message:
+          "Date IA différente de la date du rapport Z CarréPOS : date du rapport conservée",
+        filename,
+        analyzedBusinessDate,
+        businessDate: filenameBusinessDate,
+      }),
+    );
+
+    result.date = filenameBusinessDate;
+  }
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(businessDate)) {
     return {
