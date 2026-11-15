@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
+import PilotageFrame from "../PilotageFrame";
 
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
@@ -764,19 +765,11 @@ export default function ReservationsAdmin() {
   const upcomingCovers = restaurantReservations.filter((item) => item.status === "confirmed" && item.reservation_date >= today).reduce((sum, item) => sum + Number(item.party_size || 0), 0);
 
   return (
-    <main>
-      <header>
-        <div><div className="brand">MAISON ODDOS</div><h1>Réservations</h1></div>
-        <div className="headerActions">
-          <button className={alertsEnabled ? "alertButton alertButtonActive" : "alertButton"} onClick={activateAlerts}>
-            {alertsEnabled ? "🔔 Alertes activées" : "🔔 Activer les alertes"}
-          </button>
-          <a href="/bons-cadeaux"><button className="secondary">Bons cadeaux · Scan QR</button></a>
-          <a href="/reservation" target="_blank"><button className="secondary">Page client ↗</button></a>
-          {isManagement && view !== "team" && <a href="/"><button className="pilotageReturn">← Retour au pilotage</button></a>}
-          <button className="secondary" onClick={logout}>Déconnexion</button>
-        </div>
-      </header>
+    <PilotageFrame
+      current="reservations"
+      title="Réservations"
+      subtitle="Planning, confirmations et paramètres des deux restaurants."
+    >
       <section>
         <div className="reservationViewTabs">
           <button className={view === "reservations" ? "active" : "secondary"} onClick={() => setView("reservations")}>Réservations</button>
@@ -901,6 +894,7 @@ export default function ReservationsAdmin() {
           </article>
         </div>}
       </section>
-    </main>
+
+    </PilotageFrame>
   );
 }
