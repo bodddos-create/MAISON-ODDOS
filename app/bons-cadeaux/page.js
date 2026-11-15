@@ -6,6 +6,7 @@ import BonScanner from "./BonScanner";
 import { gameStatistics, parisDay } from "../../lib/game-statistics";
 import { startsAt } from "../../lib/roue-config";
 import "../roue/roue.css";
+import PilotageFrame from "../PilotageFrame";
 const sb = createClient(
   "https://ldwgsogeqreywbqulqyj.supabase.co",
   "sb_publishable_heJuVcHJZcNkQm2w5Q2dIA_bUTPZTOE",
@@ -215,18 +216,7 @@ export default function Bons() {
   const analysis = gameStatistics(daily, entries, from, to);
   const peak = Math.max(1, ...analysis.days.map(d => d.plays));
   return (
-    <div className="wheel-app">
-      <header>
-        <a className="wordmark" href="/">
-          MAISON ODDOS<small>GESTION DES BONS · LA MAISON DU PARC</small>
-        </a>
-        <nav>
-          <a href="/">Pilotage Restaurant</a>
-          <a href="/reservations">Réservations</a>
-          <a href="/jeu">Voir le jeu</a>
-        </nav>
-      </header>
-      <main className="dashboard">
+    <PilotageFrame current="bons-cadeaux" title="Bons cadeaux · Scan QR" subtitle="Gestion et validation des cadeaux Maison Oddos."><section className="wheel-app dashboard">
         <p className="eyebrow">ESPACE RÉSERVÉ À L’ÉQUIPE AUTORISÉE</p>
         <h1>
           Les cadeaux.
@@ -492,7 +482,7 @@ export default function Bons() {
             </section>
           </div>
         )}
-      </main>
-    </div>
+      </section>
+    </PilotageFrame>
   );
 }
