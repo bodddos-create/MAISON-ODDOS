@@ -637,3 +637,47 @@ body>main .brandLogo,main:not(.dashboardMain) .brandLogo{
   .restaurantSwitch{gap:4px;padding:3px}
   .restaurantSwitch button{padding:8px 7px;font-size:12px}
 }
+
+
+/* Architecture commune aux pages Pilotage */
+nav.dashboard-tabs a{
+  color:#d8d9d0;
+  padding:10px 12px;
+  border-radius:11px;
+  font-weight:650;
+  display:flex;
+  align-items:center;
+  gap:4px;
+  min-height:42px;
+  text-decoration:none
+}
+nav.dashboard-tabs a:hover,
+nav.dashboard-tabs a.active{background:var(--olive);color:#fff}
+.sidebarFoot a{
+  display:block;
+  margin-top:8px;
+  color:#d4d6cb;
+  font-size:11px;
+  text-decoration:none
+}
+.sectionTopbar p{margin:7px 0 0;color:var(--muted)}
+.sectionDashboard>section{
+  background:var(--paper);
+  border:1px solid rgba(215,207,190,.78);
+  border-radius:18px;
+  padding:22px;
+  box-shadow:0 8px 24px rgba(42,48,32,.05)
+}
+.mobileNav a{
+  color:#757a6f;
+  padding:4px 2px;
+  font-size:9px;
+  text-align:center;
+  text-decoration:none
+}
+.mobileNav a span{
+  display:block;
+  margin-bottom:2px;
+  font-size:19px
+}
+.mobileNav a.active{color:var(--olive);font-weight:800}
